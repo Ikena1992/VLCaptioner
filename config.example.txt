@@ -1,0 +1,12 @@
+# Ollama vision model used for caption refinement.
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=orcarouter/Qwen3.8-27B-Uncensored:q4_K_M
+TORII_OLLAMA_MODEL=hf.co/DraconicDragon/ToriiGate-0.5-GGUF:Q4_K_M
+OLLAMA_TIMEOUT_SECONDS=300
+OLLAMA_CONTEXT_SIZE=65536
+
+# Danbooru authentication.
+DANBOORU_LOGIN=your-login
+DANBOORU_API_KEY=your-api-key
+# Optional: identify your installation in Danbooru request logs.
+DANBOORU_USER_AGENT=VLCaptioner/1.0 (your-login)
