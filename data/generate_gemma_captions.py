@@ -35,6 +35,10 @@ def is_context_size_error(error):
     return "exceeds the available context size" in str(error).casefold()
 
 
+def is_token_repeat_error(error):
+    return "token repeat limit reached" in str(error).casefold()
+
+
 def load_prompt_builder():
     module_path = SCRIPT_DIR / "build_gemma_prompts.py"
     spec = importlib.util.spec_from_file_location("gemma_prompt_builder", module_path)
@@ -256,14 +260,24 @@ def generate_caption(
         cached = get_cached_caption(image_path, kind, model, prompt, cache_path)
     if cached:
         return cached
-    text, _ = client.chat(model, prompt, image_path, {
+    options = {
         "temperature": 0.0,
         "num_predict": CAPTION_MAX_NEW_TOKENS[kind],
         "num_ctx": context_size,
         "repeat_last_n": 256,
         "repeat_penalty": 1.15,
         "stop": ["END_CAPTION"],
-    })
+    }
+    try:
+        text, _ = client.chat(model, prompt, image_path, options)
+    except RuntimeError as error:
+        if not is_token_repeat_error(error):
+            raise
+        tqdm.write(f"Retrying {image_path.name} ({kind}): token repeat limit reached")
+        # Change greedy decoding so the retry can escape the same repetition loop.
+        text, _ = client.chat(model, prompt, image_path, {
+            **options, "temperature": 0.3, "repeat_penalty": 1.2,
+        })
     save_cached_caption(image_path, kind, model, prompt, text, cache_path)
     return text
 
@@ -401,6 +415,7 @@ def main(argv=None):
     ):
         finish_image(image_path)
     failed_context = 0
+    failed_repeat = 0
     progress = tqdm(prompts, desc="Refinement (Ollama)", unit="image", dynamic_ncols=True, smoothing=0.1)
     for index, image_path in enumerate(progress, start=1):
         started = time.monotonic()
@@ -416,25 +431,32 @@ def main(argv=None):
             )
             finish_image(image_path)
         except RuntimeError as error:
-            if not is_context_size_error(error):
+            if is_token_repeat_error(error):
+                failed_repeat += 1
+                tqdm.write(f"Skipping {image_path.name}: repetition persisted after retry ({error})")
+            elif is_context_size_error(error):
+                failed_context += 1
+                tqdm.write(
+                    f"Skipping {image_path.name}: request exceeds "
+                    f"OLLAMA_CONTEXT_SIZE={context_size} ({error})"
+                )
+            else:
                 raise
-            failed_context += 1
-            tqdm.write(
-                f"Skipping {image_path.name}: request exceeds "
-                f"OLLAMA_CONTEXT_SIZE={context_size} ({error})"
-            )
         status = (
             f"request {index}/{len(prompts)}, "
             f"{time.monotonic() - started:.1f}s/image"
         )
         if failed_context:
             status += f", context-skipped {failed_context}"
+        if failed_repeat:
+            status += f", repetition-skipped {failed_repeat}"
         progress.set_postfix_str(status, refresh=False)
-    if failed_context:
+    if failed_context or failed_repeat:
         raise SystemExit(
-            f"Refinement completed with {failed_context} image(s) skipped because "
-            "their requests exceeded OLLAMA_CONTEXT_SIZE. Increase the setting "
-            "and retry the pipeline to process them."
+            f"Refinement completed with {failed_context} context-size failure(s) "
+            f"and {failed_repeat} token-repetition failure(s). "
+            "Retry the pipeline to process skipped images. For context-size "
+            "failures, increase OLLAMA_CONTEXT_SIZE first."
         )
     print("\nDone!\n")
     return 0
