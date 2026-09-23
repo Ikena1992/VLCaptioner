@@ -8,6 +8,7 @@ data/parquet/
 data/parquet_examples/
 data/caches/*
 !data/caches/cache_tags.seed.sqlite3
+!data/caches/gelbooru_tag_categories.seed.sqlite3
 !data/caches/cache_wiki.seed.sqlite3
 !data/caches/danbooru_character_explanationsFromVLM.seed.sqlite3
 data/danbooru_credentials.py

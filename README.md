@@ -353,6 +353,8 @@ Gelbooru tag types persist between runs in
 `data/caches/gelbooru_tag_categories.sqlite3`, using the existing SQLite cache
 implementation. Only uncached types are requested; Danbooru's cache stays separate
 because the sites can classify the same tag differently.
+New installations copy the bundled `gelbooru_tag_categories.seed.sqlite3` into
+the writable cache on first use. Later tag-type updates stay local.
 
 ## Troubleshooting
 
