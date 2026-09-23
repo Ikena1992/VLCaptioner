@@ -289,7 +289,7 @@ as `END_CAPTION` or `<think>`, or more than 250 words between sentence breaks in
 trigger review. The image and its companion files move together to
 `captionReview/`. The pipeline log shows each image and the reason, followed
 by a count of each failure type. Suspicious but uncertain wording is not moved.
-Run `python data/quarantine_runaway_captions.py --dry-run` to preview findings
+Run `python data/check_caption_quality.py --dry-run` to preview findings
 without moving files.
 
 ## Optional tools
