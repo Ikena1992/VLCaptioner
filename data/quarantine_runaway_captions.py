@@ -81,13 +81,19 @@ def quarantine(
 
     found = 0
     checked = 0
+    unreadable = 0
     issue_counts: dict[str, int] = {}
     for stem, files in tqdm(sorted(files_by_stem.items()), desc="Checking captions", unit="image"):
         # Skip unrelated sidecars until an image or caption identifies an output set.
         if not any(path.suffix.lower() in IMAGE_EXTENSIONS | {".short", ".long"} for path in files):
             continue
         checked += 1
-        issues = quality_issues(files, max_sentence_words)
+        try:
+            issues = quality_issues(files, max_sentence_words)
+        except OSError as error:
+            unreadable += 1
+            print(f"SKIP {stem}: could not read caption ({error})", flush=True)
+            continue
         if not issues:
             continue
         collisions = [destination / file.name for file in files if (destination / file.name).exists()]
@@ -107,7 +113,8 @@ def quarantine(
             for file in files:
                 shutil.move(str(file), destination / file.name)
     print(f"Checked {checked} image set(s); "
-          f"{'would move' if dry_run else 'moved'} {found} for review.", flush=True)
+          f"{'would move' if dry_run else 'moved'} {found} for review; "
+          f"could not check {unreadable}.", flush=True)
     for issue, count in sorted(issue_counts.items()):
         print(f"  {count} x {issue}", flush=True)
     return found
