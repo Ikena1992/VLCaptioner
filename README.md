@@ -1,9 +1,9 @@
 # VLCaptioner
 
-VLCaptioner prepares image datasets with short captions, detailed captions, and
-Danbooru-style tags. It uses ToriiGate to analyze images and a second Ollama
-vision model to refine the captions. Finished images and text files are saved
-in `done/`.
+VLCaptioner (Visual Language Captioner) prepares image datasets with short
+captions, detailed captions, and Danbooru-style tags. It uses ToriiGate to
+analyze images and a second Ollama vision model to refine the captions.
+Finished images and text files are saved in `done/`.
 
 Ollama can run locally or on another computer on your network. Optional
 AnimeTimm/WD14 tagging runs on the computer running VLCaptioner.
