@@ -27,6 +27,7 @@ Important:
 from __future__ import annotations
 
 from quality_tags import get_quality_tag, normalize_quality_tag
+from year_tags import get_year_tag
 
 import csv
 import os
@@ -394,6 +395,7 @@ def build_tag_list(
     row: dict[str, str],
     cleaned_general_tags: list[str],
     rng: random.Random,
+    add_year_tag: bool = False,
 ) -> list[str]:
     """Build the final ordered tag list from one CSV row."""
     # [quality tag]
@@ -412,6 +414,8 @@ def build_tag_list(
     if not period_tag and DERIVE_PERIOD_FROM_CREATED_AT_IF_MISSING:
         period_tag = get_period_tag(get_column(row, "created_at", "created at"))
     period_tags = [normalize_tag(period_tag)] if period_tag else []
+
+    year_tag = (get_column(row, "year tag") or get_year_tag(get_column(row, "created_at", "created at"))) if add_year_tag else ""
 
     # [safety tags]
     rating = get_column(row, "rating")
@@ -452,6 +456,7 @@ def build_tag_list(
             *quality_tags,
             *meta_tags,
             *period_tags,
+            *([year_tag] if year_tag else []),
             *safety_tags,
             *count_tags,
             *character_tags,
@@ -469,6 +474,7 @@ def process_csv(
     dropout_rng: random.Random,
     dropout_protected_tags: set[str],
     report_success: bool = True,
+    add_year_tag: bool = False,
 ) -> bool:
     """Create one .tag file directly from one .csv."""
     output_path = csv_path.with_suffix(OUTPUT_EXTENSION)
@@ -493,7 +499,7 @@ def process_csv(
         protected_tags=dropout_protected_tags,
     )
 
-    final_tags = build_tag_list(row, clean_tags, rng)
+    final_tags = build_tag_list(row, clean_tags, rng, add_year_tag=add_year_tag)
 
     try:
         output_path.write_text(", ".join(final_tags), encoding="utf-8")

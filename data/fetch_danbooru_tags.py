@@ -8,6 +8,7 @@ from refresh_tags_from_danbooru import post_to_tags, get_period_tag, get_rating_
 from tqdm import tqdm
 from danbooru_client import danbooru_get
 from gelbooru_client import lookup_gelbooru
+from year_tags import get_year_tag
 
 # ---------------- CONFIG ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))  # script location
@@ -62,6 +63,7 @@ def save_tags(md5_hash, tags, overwrite_existing_txt=False):
         "score": score,
         "quality tag": quality_tag,
         "created_at": tags.get("created_at", ""),
+        "year tag": get_year_tag(tags.get("created_at", "")),
     }
     # Enrich legacy CSVs without discarding manually edited/tagger-added fields.
     if os.path.exists(csv_path):

@@ -26,15 +26,18 @@ class PipelineGUI:
         self.skip_wd14 = tk.BooleanVar(value=True)
         ttk.Checkbutton(frame, text="Skip WD14 high-confidence missing-tag step", variable=self.skip_wd14).pack(anchor="w", pady=(0, 8))
         self.overwrite_danbooru_txt = tk.BooleanVar()
-        ttk.Checkbutton(frame, text="Overwrite existing TXT files with fresh Danbooru tags", variable=self.overwrite_danbooru_txt).pack(anchor="w", pady=(0, 8))
+        ttk.Checkbutton(frame, text="Overwrite existing TXT files with fresh Danbooru or Gelbooru tags", variable=self.overwrite_danbooru_txt).pack(anchor="w", pady=(0, 8))
         self.overwrite_caption_cache = tk.BooleanVar()
         ttk.Checkbutton(frame, text="Overwrite cached short and long captions", variable=self.overwrite_caption_cache).pack(anchor="w", pady=(0, 8))
+        self.add_year_tag = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Add year tag to .tag files", variable=self.add_year_tag).pack(anchor="w", pady=(0, 8))
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x", pady=(0, 8))
         self.start_button = ttk.Button(buttons, text="Start pipeline", command=self.start)
         self.start_button.pack(side="left")
         self.stop_button = ttk.Button(buttons, text="Stop", command=self.stop, state="disabled")
         self.stop_button.pack(side="left", padx=8)
+        ttk.Button(buttons, text="Open copy/move images GUI", command=self.open_copy_move_gui).pack(side="left", padx=8)
         self.status = ttk.Label(buttons, text="Ready")
         self.status.pack(side="right")
         self.log = scrolledtext.ScrolledText(frame, state="disabled", wrap="word")
@@ -47,6 +50,15 @@ class PipelineGUI:
         self.log.insert("end", value)
         self.log.see("end")
         self.log.configure(state="disabled")
+
+    def open_copy_move_gui(self):
+        try:
+            subprocess.Popen(
+                [sys.executable, str(ROOT / "data" / "copy_move_images_GUI.py")],
+                cwd=ROOT,
+            )
+        except OSError as error:
+            messagebox.showerror("VLCaptioner", f"Could not open copy/move images GUI: {error}")
 
     def start(self):
         stages = list(STAGES)
@@ -62,6 +74,7 @@ class PipelineGUI:
                 self.overwrite_danbooru_txt.get(),
                 self.overwrite_caption_cache.get(),
                 self.skip_wd14.get(),
+                self.add_year_tag.get(),
             ),
             daemon=True,
         ).start()
@@ -72,6 +85,7 @@ class PipelineGUI:
         overwrite_danbooru_txt=False,
         overwrite_caption_cache=False,
         skip_wd14_high_confidence=False,
+        add_year_tag=False,
     ):
         code = 0
         for stage in stages:
@@ -87,6 +101,7 @@ class PipelineGUI:
                     overwrite_danbooru_txt,
                     overwrite_caption_cache,
                     skip_wd14_high_confidence,
+                    add_year_tag,
                 ), cwd=ROOT,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 encoding="utf-8", errors="replace", **options,

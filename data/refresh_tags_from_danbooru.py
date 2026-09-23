@@ -7,6 +7,7 @@ from datetime import datetime
 from tqdm import tqdm
 from danbooru_client import danbooru_get
 from gelbooru_client import lookup_gelbooru
+from year_tags import get_year_tag
 
 # ---------------- CONFIG ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -359,6 +360,7 @@ def save_tags(md5_hash, tags):
                 "score",
                 "quality tag",
                 "created_at",
+                "year tag",
             ])
 
             writer.writerow([
@@ -377,6 +379,7 @@ def save_tags(md5_hash, tags):
                 score,
                 quality_tag,
                 tags.get("created_at", ""),
+                get_year_tag(tags.get("created_at", "")),
             ])
 
         # ---------------- SAVE TXT ----------------

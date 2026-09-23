@@ -223,7 +223,7 @@ downloads the matching tags and metadata. Image conversion preserves the
 filename's hash, which is used for the Danbooru lookup.
 
 Existing `.txt` tag files are kept and their Danbooru lookup is skipped unless
-**Overwrite existing TXT files with fresh Danbooru tags** is enabled. If an
+**Overwrite existing TXT files with fresh Danbooru or Gelbooru tags** is enabled. If an
 image has no matching Danbooru post or uses another filename, its tags can come
 from a matching `.txt` file or from AnimeTimm. Images still without a `.txt`
 file at the tagging stage require AnimeTimm model access.
@@ -236,7 +236,8 @@ image files.
 | Option | Behavior |
 | --- | --- |
 | **Skip WD14 high-confidence missing-tag step** | Enabled by default. Skips adding high-confidence WD14 tags to existing text files. Images still without text files after Danbooru are tagged by AnimeTimm regardless of this setting. |
-| **Overwrite existing TXT files with fresh Danbooru tags** | Replaces existing source tags with fresh Danbooru tags. Existing tags are preserved when unchecked. |
+| **Overwrite existing TXT files with fresh Danbooru or Gelbooru tags** | Replaces existing source tags with fresh tags from the first matching booru. Existing tags are preserved when unchecked. |
+| **Add year tag to .tag files** | Off by default. Adds `year YYYY` from the Danbooru or Gelbooru post upload date when available. |
 | **Overwrite cached short and long captions** | Regenerates short and long captions instead of reusing previous results. |
 
 The pipeline converts images, fetches Danbooru tags, and runs local AnimeTimm
@@ -307,8 +308,7 @@ without moving files.
 ### Copy or move images by tags
 
 The helper keeps images and matching `.txt` files together.
-Run `.\copy_move_images_GUI.bat` on Windows or
-`bash copy_move_images_GUI.sh` on Linux.
+Click **Open copy/move images GUI** in the main caption GUI.
 
 ### Export captions as a ZIP
 
@@ -340,6 +340,10 @@ source tags or `--overwrite-caption-cache` to regenerate captions.
 Tag lookup searches Danbooru first, then Gelbooru when no matching post is found.
 Both use the MD5 in the image filename. Gelbooru results retain tag categories,
 rating, score, post ID, and original source URL; the CSV `source` is `gelbooru`.
+The optional year tag uses the matched post's upload year and is omitted when
+the source has no usable date. The pipeline does not generate aesthetic score
+tags such as `score_1` through `score_9`; post scores only determine quality
+labels such as `good quality`.
 Existing TXT files are still skipped unless `--overwrite-danbooru-txt` is used.
 The standalone refresh script also uses this fallback.
 If Gelbooru requires authentication, add `GELBOORU_USER_ID` and `GELBOORU_API_KEY`

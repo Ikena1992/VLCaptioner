@@ -36,12 +36,15 @@ def stage_command(
     overwrite_danbooru_txt=False,
     overwrite_caption_cache=False,
     skip_wd14_high_confidence=False,
+    add_year_tag=False,
 ):
     command = [python, str(ROOT / "data" / stage.script)]
     if stage.script == "fetch_danbooru_tags.py" and overwrite_danbooru_txt:
         command.append("--overwrite-existing-txt")
     if stage.script == "generate_gemma_captions.py" and overwrite_caption_cache:
         command.append("--overwrite-caption-cache")
+    if stage.script == "generate_gemma_captions.py" and add_year_tag:
+        command.append("--add-year-tag")
     if stage.script == "tag_images_with_wd14.py" and skip_wd14_high_confidence:
         command.append("--skip-high-confidence-missing-tags")
     return command
