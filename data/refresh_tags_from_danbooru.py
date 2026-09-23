@@ -8,7 +8,6 @@ from tqdm import tqdm
 from danbooru_client import danbooru_get
 from gelbooru_client import lookup_gelbooru
 from year_tags import get_year_tag
-from source_tag_file import write_source_tags, read_source_metadata
 
 # ---------------- CONFIG ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -384,9 +383,7 @@ def save_tags(md5_hash, tags):
             "year tag": get_year_tag(tags.get("created_at", "")),
         }
         with open(txt_path, "w", encoding="utf-8") as f_txt:
-            f_txt.write(write_source_tags(", ".join(all_tags), row))
-        with open(txt_path, encoding="utf-8") as source_file:
-            row = read_source_metadata(source_file.read())
+            f_txt.write(", ".join(all_tags) + "\n")
         with open(csv_path, "w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(row))
             writer.writeheader()

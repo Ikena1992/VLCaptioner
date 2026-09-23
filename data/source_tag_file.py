@@ -18,7 +18,3 @@ def read_source_metadata(content):
                 raise ValueError("Invalid source tag metadata")
             return value
     return None
-
-
-def write_source_tags(tags, metadata):
-    return tags.strip() + "\n" + MARKER + json.dumps(metadata, ensure_ascii=False, sort_keys=True) + "\n"

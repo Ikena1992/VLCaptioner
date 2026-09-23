@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "data"))
 
-from source_tag_file import read_source_tags, read_source_metadata, write_source_tags
+from source_tag_file import MARKER, read_source_tags, read_source_metadata
 
 
 class SourceTagFileTests(unittest.TestCase):
@@ -20,7 +20,11 @@ class SourceTagFileTests(unittest.TestCase):
             "score": 121,
             "created_at": "2025-02-02T00:00:00Z",
         }
-        content = write_source_tags("some character, highres, watercolor (medium)", row)
+        import json
+        content = (
+            "some character, highres, watercolor (medium)\n"
+            + MARKER + json.dumps(row) + "\n"
+        )
         self.assertEqual(read_source_metadata(content), row)
         self.assertEqual(
             read_source_tags(content),
