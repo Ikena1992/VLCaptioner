@@ -1,3 +1,4 @@
+from quality_tags import get_quality_tag
 import os
 import csv
 import time
@@ -199,27 +200,6 @@ def format_tag(tag):
 def format_tags(tag_string):
     """Format tag string for saving in CSV."""
     return ", ".join(format_tag(tag) for tag in split_tags(tag_string))
-
-
-def get_quality_tag(score):
-    """Determine quality tag based on score."""
-    try:
-        score = int(score)
-    except Exception:
-        score = 0
-
-    if score > 180:
-        return "masterpiece"
-    elif 120 < score <= 180:
-        return "best quality"
-    elif 80 < score <= 120:
-        return "good quality"
-    elif 5 < score <= 80:
-        return "normal quality"
-    elif 0 <= score <= 5:
-        return "low quality"
-    else:
-        return "worst quality"
 
 
 def get_period_tag(created_at):

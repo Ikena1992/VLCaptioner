@@ -1,3 +1,4 @@
+from quality_tags import get_quality_tag, normalize_quality_tag
 import os
 import csv
 import argparse
@@ -40,23 +41,6 @@ def format_tags(tag_string):
     tags = tag_string.strip().split()
     return ", ".join([t.replace("_", " ") for t in tags])
 
-def get_quality_tag(score):
-    """Determine quality tag based on score."""
-    if score > 156:
-        return "masterpiece"
-    elif 100 < score <= 156:
-        return "best quality"
-    elif 75 < score <= 100:
-        return "high quality"
-    elif 25 < score <= 75:
-        return "medium quality"
-    elif 3 < score <= 25:
-        return "normal quality"
-    elif 0 <= score <= 3:
-        return "low quality"
-    else:
-        return "worst quality"
-
 def save_tags(md5_hash, tags, overwrite_existing_txt=False):
     """Save CSV and TXT files for an image's tags."""
     csv_path = os.path.join(IMAGE_FOLDER, f"{md5_hash}.csv")
@@ -84,6 +68,7 @@ def save_tags(md5_hash, tags, overwrite_existing_txt=False):
         with open(csv_path, newline="", encoding="utf-8-sig") as handle:
             old = next(csv.DictReader(handle), {})
         row.update({key: value for key, value in old.items() if key and value})
+    row["quality tag"] = normalize_quality_tag(row["quality tag"])
     temporary = Path(csv_path + ".tmp")
     with temporary.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(row))

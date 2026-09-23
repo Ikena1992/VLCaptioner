@@ -26,6 +26,8 @@ Important:
 
 from __future__ import annotations
 
+from quality_tags import get_quality_tag, normalize_quality_tag
+
 import csv
 import os
 import random
@@ -61,6 +63,10 @@ RECURSIVE = False
 OVERWRITE_EXISTING = True
 
 OUTPUT_EXTENSION = ".tag"
+
+EXCLUDED_OUTPUT_TAGS = {
+    "very aesthetic", "aesthetic", "displeasing", "very displeasing",
+}
 
 # Artist config
 ARTIST_PREFIX = "@"
@@ -271,39 +277,6 @@ def get_column(row: dict[str, str], *names: str) -> str:
     return ""
 
 
-def get_quality_tag(score: str | int | float | None) -> str:
-    """Return a quality tag from a numeric score.
-
-    Empty or non-numeric score columns are allowed and produce no quality tag.
-    This prevents CSVs created from TXT files with blank score columns from
-    accidentally becoming "low quality" or crashing on string/int comparison.
-    """
-    if score is None:
-        return ""
-
-    score_text = str(score).strip()
-    if not score_text:
-        return ""
-
-    try:
-        score_int = int(float(score_text))
-    except Exception:
-        return ""
-
-    if score_int > 180:
-        return "masterpiece"
-    elif 120 < score_int <= 180:
-        return "best quality"
-    elif 80 < score_int <= 120:
-        return "good quality"
-    elif 5 < score_int <= 80:
-        return "normal quality"
-    elif 0 <= score_int <= 5:
-        return "low quality"
-    else:
-        return "worst quality"
-
-
 def get_period_tag(created_at: str) -> str:
     """Same period mapping as the Danbooru update script."""
     if not created_at:
@@ -427,7 +400,7 @@ def build_tag_list(
     quality_tag = get_column(row, "quality tag", "quality")
     if not quality_tag and DERIVE_QUALITY_FROM_SCORE_IF_MISSING:
         quality_tag = get_quality_tag(get_column(row, "score"))
-    quality_tags = [normalize_tag(quality_tag)] if quality_tag else []
+    quality_tags = [normalize_quality_tag(quality_tag)] if quality_tag else []
 
     # [metatags]
     meta_tags = get_meta_tags_for_output(
@@ -474,7 +447,7 @@ def build_tag_list(
     # Final order:
     # [quality tag], [metatags], [Period], [safety tags],
     # [1girl/1boy/1other etc], [characters], [Copyright], [@artists], [general tags]
-    return dedupe_preserve_order(
+    ordered_tags = dedupe_preserve_order(
         [
             *quality_tags,
             *meta_tags,
@@ -487,6 +460,7 @@ def build_tag_list(
             *general_tags,
         ]
     )
+    return [tag for tag in ordered_tags if tag.casefold() not in EXCLUDED_OUTPUT_TAGS]
 
 
 def process_csv(
