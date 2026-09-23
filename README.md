@@ -134,6 +134,10 @@ OLLAMA_CONTEXT_SIZE=65536
 DANBOORU_LOGIN=your-login
 DANBOORU_API_KEY=your-api-key
 DANBOORU_USER_AGENT=VLCaptioner/1.0 (your-login)
+
+# Optional Gelbooru fallback credentials
+GELBOORU_USER_ID=
+GELBOORU_API_KEY=
 ```
 
 | Setting | Purpose |
@@ -145,8 +149,14 @@ DANBOORU_USER_AGENT=VLCaptioner/1.0 (your-login)
 | `OLLAMA_CONTEXT_SIZE` | Refinement context window. Defaults to `65536`. High-resolution images may need more. |
 | `DANBOORU_LOGIN`, `DANBOORU_API_KEY` | Credentials used for Danbooru metadata requests. |
 | `DANBOORU_USER_AGENT` | Optional identifier for Danbooru requests. |
+| `GELBOORU_USER_ID`, `GELBOORU_API_KEY` | Optional credentials for Gelbooru fallback requests. Obtain both from your Gelbooru account options; API access may require them. |
 
-Keep `config.txt` private: it contains your API key. VLCaptioner reads these
+Gelbooru is searched when Danbooru has no matching post. Leave the Gelbooru
+credentials blank for unauthenticated access, or fill in both when required.
+Tag categories are cached automatically in
+`data/caches/gelbooru_tag_categories.sqlite3`; no cache setting is needed.
+
+Keep `config.txt` private: it contains your API keys. VLCaptioner reads these
 settings from the file, not from environment variables.
 
 ### Ollama on another computer
