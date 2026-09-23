@@ -15,4 +15,5 @@ data/danbooru_credentials.py
 /config.txt
 __pycache__/
 *.pyc
-/tests/
+/tests/*
+!/tests/test_finalization_routing.py

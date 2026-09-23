@@ -26,7 +26,6 @@ STAGES = (
     Stage("generate_torii_captions.py", "Generate Torii captions"),
     Stage("normalize_torii_captions.py", "Normalize Torii captions"),
     Stage("generate_gemma_captions.py", "Generate refined captions and finalize images"),
-    Stage("check_caption_quality.py", "Check caption quality"),
 )
 
 

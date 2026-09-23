@@ -114,8 +114,8 @@ data/env/bin/hf auth login
 
 Follow the login prompts. Images still without text tag files after the
 Danbooru step are tagged by AnimeTimm, regardless of the GUI checkbox. In the
-GUI, clear **Skip WD14 high-confidence missing-tag step** to also append
-high-confidence WD14 tags to existing text files.
+GUI, enable **Add high-confidence WD14 tags to existing tag files** to also
+append missing high-confidence WD14 tags to existing text files.
 
 ## Configuration
 
@@ -209,8 +209,11 @@ placing them in `done/`.
    lookups. For a first run, provide a `.txt` file so you can test captioning
    without relying on local AnimeTimm model access.
 3. Start the GUI with `.\GUI.bat` on Windows or `bash GUI.sh` on Linux.
-4. Choose the options below and click **Start pipeline**.
-5. Check the log for failures and collect completed assets from `done/`.
+4. Use **Check again** to confirm images, configuration, and Ollama are ready.
+   Missing Ollama models are reported and downloaded when the run starts.
+5. Choose any **Advanced options**, then click **Start captioning**.
+6. Watch the current stage and open completed files or files needing review
+   from the GUI. Expand **Show detailed log** to inspect failures.
 
 Files with the same base filename share an output name and can overwrite one
 another during conversion or finalization.
@@ -223,7 +226,7 @@ downloads the matching tags and metadata. Image conversion preserves the
 filename's hash, which is used for the Danbooru lookup.
 
 Existing `.txt` tag files are kept and their Danbooru lookup is skipped unless
-**Overwrite existing TXT files with fresh Danbooru or Gelbooru tags** is enabled. If an
+**Replace existing tags with fresh Danbooru or Gelbooru tags** is enabled. If an
 image has no matching Danbooru post or uses another filename, its tags can come
 from a matching `.txt` file or from AnimeTimm. Images still without a `.txt`
 file at the tagging stage require AnimeTimm model access.
@@ -233,13 +236,13 @@ image files.
 
 ### GUI options
 
-| Option | Behavior |
-| --- | --- |
-| **Skip WD14 high-confidence missing-tag step** | Enabled by default. Skips adding high-confidence WD14 tags to existing text files. Images still without text files after Danbooru are tagged by AnimeTimm regardless of this setting. |
-| **Overwrite existing TXT files with fresh Danbooru or Gelbooru tags** | Replaces existing source tags with fresh tags from the first matching booru. Existing tags are preserved when unchecked. |
-| **Add year tag to .tag files** | Off by default. Adds `year YYYY` from the Danbooru or Gelbooru post upload date when available. |
-| **Add copyright tags to .tag files** | Off by default. Includes copyright and series tags from the CSV in the generated `.tag` and `.combined` files. The source TXT and CSV retain them either way. |
-| **Overwrite cached short and long captions** | Regenerates short and long captions instead of reusing previous results. |
+| Option | On | Off (default) |
+| --- | --- | --- |
+| **Add high-confidence WD14 tags to existing tag files** | Appends missing high-confidence tags. | Leaves existing tag files unchanged. Images without tags are tagged either way. |
+| **Replace existing tags with fresh Danbooru or Gelbooru tags** | Replaces matching source tags with tags from the first matching post. | Keeps existing tag files and skips their lookup. |
+| **Regenerate cached captions** | Generates short and long captions again. | Reuses cached captions when available. |
+| **Add upload year to .tag files** | Adds `year YYYY` when a post date is available. | Omits the year tag. |
+| **Include copyright and series tags in .tag files** | Includes them in `.tag` and `.combined`. | Omits them there; source TXT and CSV retain them. |
 
 The pipeline converts images, fetches Danbooru tags, and runs local AnimeTimm
 tagging where needed. It looks up tag and character explanations and creates
@@ -247,10 +250,10 @@ the CSV metadata needed for captioning. Eligible clean, single-character images 
 supply generated character references.
 
 Torii then produces visual analysis, which is normalized and passed to the
-refinement model. The final stage creates long and short captions, cleans the
-tags, and saves each completed asset set in `done/`. The pipeline then checks
-captions for definite failures and moves affected image sets to `captionReview/`. Existing
-caches are reused when available.
+refinement model. The final stage creates long and short captions and cleans the
+tags. Each asset set is checked before publication: passing sets go straight to
+`done/`, and flagged sets go straight to `captionReview/`. Existing caches are
+reused when available.
 
 ### Stopping and resuming
 
@@ -259,8 +262,8 @@ Fix any reported issue and start the pipeline again to process remaining
 images in `images/`. Existing results and caches are reused where possible.
 
 To regenerate captions for a completed image, copy the image and its source
-`.txt` tags back into `images/` and enable **Overwrite cached short and long
-captions**. The new output replaces matching files in `done/`.
+`.txt` tags back into `images/` and enable **Regenerate cached captions**.
+The new output replaces matching files in `done/`.
 
 After an interrupted save, `.finalize-*` folders in `done/` hold the recovery
 information needed by the next run. Removing them prevents automatic recovery.
@@ -305,12 +308,12 @@ done/sample.webp      The processed image
 
 ### Caption quality review
 
-After captioning, the GUI and command-line pipeline check caption sets in
-`done/`. Missing or empty `.short`/`.long` captions, leaked control text such
+During finalization, the GUI and command-line pipeline check caption sets before
+placing them in `done/`. Missing or empty `.short`/`.long` captions, leaked control text such
 as `END_CAPTION` or `<think>`, or more than 250 words between sentence breaks in a long caption
-trigger review. The image and its companion files move together to
-`captionReview/`. The pipeline log shows each image and the reason, followed
-by a count of each failure type. Suspicious but uncertain wording is not moved.
+trigger review. The image and its companion files are placed together in
+`captionReview/`. The pipeline log shows each flagged image and the reason.
+Suspicious but uncertain wording is not flagged.
 Run `python data/check_caption_quality.py --dry-run` to preview findings
 without moving files.
 
@@ -402,7 +405,7 @@ adjusting the setting.
 
 Check Hugging Face access for AnimeTimm and the local PyTorch/GPU installation.
 The Ollama server's GPU does not run this tagger. If you already have suitable
-tags, enable **Skip WD14 high-confidence missing-tag step**.
+tags, leave **Add high-confidence WD14 tags to existing tag files** off.
 
 ### Images are skipped without captions
 
