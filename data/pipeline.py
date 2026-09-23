@@ -18,7 +18,7 @@ class Stage:
 
 STAGES = (
     Stage("convert_images_to_webp.py", "Convert images to WebP"),
-    Stage("fetch_danbooru_tags.py", "Fetch Danbooru tags"),
+    Stage("fetch_danbooru_tags.py", "Fetch Danbooru / Gelbooru tags"),
     Stage("tag_images_with_wd14.py", "Add WD14 tags", "wd14"),
     Stage("fetch_character_explanations.py", "Fetch character explanations"),
     Stage("create_metadata_csvs.py", "Create metadata CSV files"),

@@ -5,6 +5,7 @@ import requests
 from datetime import datetime
 from tqdm import tqdm
 from danbooru_client import danbooru_get
+from gelbooru_client import lookup_gelbooru
 
 # ---------------- CONFIG ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -463,17 +464,23 @@ def main():
 
         tqdm.write(f"\nProcessing MD5: {md5_hash}")
 
-        tags = lookup_danbooru(md5_hash)
+        try:
+            tags = lookup_danbooru(md5_hash)
+            if not tags:
+                tags = lookup_gelbooru(md5_hash)
+        except RuntimeError as error:
+            tqdm.write(f"Skipping {md5_hash} after lookup error: {error}")
+            continue
 
         if not tags:
-            tqdm.write(f"No tags found for {md5_hash} on Danbooru.")
+            tqdm.write(f"No tags found for {md5_hash} on Danbooru or Gelbooru.")
             time.sleep(REQUEST_DELAY_SECONDS)
             continue
 
         period = get_period_tag(tags.get("created_at", ""))
 
         tqdm.write(
-            f"Found tags on Danbooru, "
+            f"Found tags on {tags.get('source', '')}, "
             f"post ID: {tags.get('post_id', '')}, "
             f"score: {tags.get('score', 0)}, "
             f"rating: {tags.get('rating', '')}, "

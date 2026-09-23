@@ -6,6 +6,7 @@ from pathlib import Path
 from refresh_tags_from_danbooru import post_to_tags, get_period_tag, get_rating_tags
 from tqdm import tqdm
 from danbooru_client import danbooru_get
+from gelbooru_client import lookup_gelbooru
 
 # ---------------- CONFIG ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))  # script location
@@ -117,20 +118,22 @@ def main(overwrite_existing_txt=False):
 
         try:
             tags = lookup_danbooru(md5_hash)
+            if not tags:
+                tags = lookup_gelbooru(md5_hash)
         except RuntimeError as error:
-            tqdm.write(f"Skipping {md5_hash} after Danbooru error: {error}")
+            tqdm.write(f"Skipping {md5_hash} after lookup error: {error}")
             continue
         if not tags:
-            tqdm.write(f"No tags found for {md5_hash} on Danbooru.")
+            tqdm.write(f"No tags found for {md5_hash} on Danbooru or Gelbooru.")
             continue
 
-        tqdm.write(f"Found tags on Danbooru, score: {tags.get('score', 0)}")
+        tqdm.write(f"Found tags on {tags.get('source', '')}, score: {tags.get('score', 0)}")
         save_tags(md5_hash, tags, overwrite_existing_txt=overwrite_existing_txt)
 
     print("Done!\n")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Fetch Danbooru tags for image files.")
+    parser = argparse.ArgumentParser(description="Fetch Danbooru tags with Gelbooru fallback for image files.")
     parser.add_argument(
         "--overwrite-existing-txt",
         action="store_true",

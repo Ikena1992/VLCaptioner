@@ -10,3 +10,8 @@ DANBOORU_LOGIN=your-login
 DANBOORU_API_KEY=your-api-key
 # Optional: identify your installation in Danbooru request logs.
 DANBOORU_USER_AGENT=VLCaptioner/1.0 (your-login)
+
+# Optional Gelbooru fallback authentication (from your Gelbooru account options).
+# Gelbooru may require these credentials for API access.
+GELBOORU_USER_ID=
+GELBOORU_API_KEY=

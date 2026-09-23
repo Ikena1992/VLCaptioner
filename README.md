@@ -327,6 +327,19 @@ either way. Omit it to also update existing tag files. Use
 `--overwrite-danbooru-txt` to refresh
 source tags or `--overwrite-caption-cache` to regenerate captions.
 
+Tag lookup searches Danbooru first, then Gelbooru when no matching post is found.
+Both use the MD5 in the image filename. Gelbooru results retain tag categories,
+rating, score, post ID, and original source URL; the CSV `source` is `gelbooru`.
+Existing TXT files are still skipped unless `--overwrite-danbooru-txt` is used.
+The standalone refresh script also uses this fallback.
+If Gelbooru requires authentication, add `GELBOORU_USER_ID` and `GELBOORU_API_KEY`
+from your Gelbooru account options to `config.txt` (see `config.example.txt`).
+API failures are reported and do not write partial Gelbooru metadata.
+Gelbooru tag types persist between runs in
+`data/caches/gelbooru_tag_categories.sqlite3`, using the existing SQLite cache
+implementation. Only uncached types are requested; Danbooru's cache stays separate
+because the sites can classify the same tag differently.
+
 ## Troubleshooting
 
 ### Cannot connect to Ollama

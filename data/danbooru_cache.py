@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 import re
 from pathlib import Path
 
@@ -15,7 +16,7 @@ class TagCategoryCache:
         self._initialize()
 
     def _initialize(self) -> None:
-        with sqlite3.connect(self.database_path) as database:
+        with closing(sqlite3.connect(self.database_path)) as database, database:
             database.execute("PRAGMA journal_mode=WAL")
             database.execute(
                 "CREATE TABLE IF NOT EXISTS tag_categories ("
@@ -23,7 +24,7 @@ class TagCategoryCache:
             )
 
     def get(self, tag: str, default=None):
-        with sqlite3.connect(self.database_path) as database:
+        with closing(sqlite3.connect(self.database_path)) as database, database:
             matches = []
             for candidate in self._candidate_keys(tag):
                 row = database.execute(
@@ -63,7 +64,7 @@ class TagCategoryCache:
         return value
 
     def __setitem__(self, tag: str, category) -> None:
-        with sqlite3.connect(self.database_path) as database:
+        with closing(sqlite3.connect(self.database_path)) as database, database:
             database.execute(
                 "INSERT OR REPLACE INTO tag_categories(tag, category) VALUES (?, ?)",
                 (normalize_cache_key(tag), category),
@@ -71,7 +72,7 @@ class TagCategoryCache:
 
     def pop(self, tag: str, default=None):
         value = self.get(tag, default)
-        with sqlite3.connect(self.database_path) as database:
+        with closing(sqlite3.connect(self.database_path)) as database, database:
             database.execute(
                 "DELETE FROM tag_categories WHERE tag = ?",
                 (normalize_cache_key(tag),),
