@@ -17,6 +17,7 @@ def main() -> int:
     parser.add_argument("--overwrite-danbooru-txt", action="store_true")
     parser.add_argument("--overwrite-caption-cache", action="store_true")
     parser.add_argument("--add-year-tag", action="store_true")
+    parser.add_argument("--add-copyright-tags", action="store_true")
     args = parser.parse_args()
     for stage in STAGES:
         print(f"\n=== {stage.label} ===", flush=True)
@@ -28,6 +29,7 @@ def main() -> int:
                 args.overwrite_caption_cache,
                 args.skip_wd14,
                 args.add_year_tag,
+                args.add_copyright_tags,
             ),
             cwd=ROOT,
         )

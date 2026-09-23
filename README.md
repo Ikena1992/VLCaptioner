@@ -238,6 +238,7 @@ image files.
 | **Skip WD14 high-confidence missing-tag step** | Enabled by default. Skips adding high-confidence WD14 tags to existing text files. Images still without text files after Danbooru are tagged by AnimeTimm regardless of this setting. |
 | **Overwrite existing TXT files with fresh Danbooru or Gelbooru tags** | Replaces existing source tags with fresh tags from the first matching booru. Existing tags are preserved when unchecked. |
 | **Add year tag to .tag files** | Off by default. Adds `year YYYY` from the Danbooru or Gelbooru post upload date when available. |
+| **Add copyright tags to .tag files** | Off by default. Includes copyright and series tags from the CSV in the generated `.tag` and `.combined` files. The source TXT and CSV retain them either way. |
 | **Overwrite cached short and long captions** | Regenerates short and long captions instead of reusing previous results. |
 
 The pipeline converts images, fetches Danbooru tags, and runs local AnimeTimm

@@ -396,6 +396,7 @@ def build_tag_list(
     cleaned_general_tags: list[str],
     rng: random.Random,
     add_year_tag: bool = False,
+    add_copyright_tags: bool = False,
 ) -> list[str]:
     """Build the final ordered tag list from one CSV row."""
     # [quality tag]
@@ -438,8 +439,9 @@ def build_tag_list(
     )
 
     # [Copyright]
-    copyright_tags = split_csv_or_single_tag(
-        get_column(row, "copyright", "copyrights", "copytags")
+    copyright_tags = (
+        split_csv_or_single_tag(get_column(row, "copyright", "copyrights", "copytags"))
+        if add_copyright_tags else []
     )
 
     # [@artists]
@@ -475,6 +477,7 @@ def process_csv(
     dropout_protected_tags: set[str],
     report_success: bool = True,
     add_year_tag: bool = False,
+    add_copyright_tags: bool = False,
 ) -> bool:
     """Create one .tag file directly from one .csv."""
     output_path = csv_path.with_suffix(OUTPUT_EXTENSION)
@@ -499,7 +502,11 @@ def process_csv(
         protected_tags=dropout_protected_tags,
     )
 
-    final_tags = build_tag_list(row, clean_tags, rng, add_year_tag=add_year_tag)
+    final_tags = build_tag_list(
+        row, clean_tags, rng,
+        add_year_tag=add_year_tag,
+        add_copyright_tags=add_copyright_tags,
+    )
 
     try:
         output_path.write_text(", ".join(final_tags), encoding="utf-8")

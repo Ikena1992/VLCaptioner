@@ -31,6 +31,8 @@ class PipelineGUI:
         ttk.Checkbutton(frame, text="Overwrite cached short and long captions", variable=self.overwrite_caption_cache).pack(anchor="w", pady=(0, 8))
         self.add_year_tag = tk.BooleanVar(value=False)
         ttk.Checkbutton(frame, text="Add year tag to .tag files", variable=self.add_year_tag).pack(anchor="w", pady=(0, 8))
+        self.add_copyright_tags = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Add copyright tags to .tag files", variable=self.add_copyright_tags).pack(anchor="w", pady=(0, 8))
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x", pady=(0, 8))
         self.start_button = ttk.Button(buttons, text="Start pipeline", command=self.start)
@@ -75,6 +77,7 @@ class PipelineGUI:
                 self.overwrite_caption_cache.get(),
                 self.skip_wd14.get(),
                 self.add_year_tag.get(),
+                self.add_copyright_tags.get(),
             ),
             daemon=True,
         ).start()
@@ -86,6 +89,7 @@ class PipelineGUI:
         overwrite_caption_cache=False,
         skip_wd14_high_confidence=False,
         add_year_tag=False,
+        add_copyright_tags=False,
     ):
         code = 0
         for stage in stages:
@@ -102,6 +106,7 @@ class PipelineGUI:
                     overwrite_caption_cache,
                     skip_wd14_high_confidence,
                     add_year_tag,
+                    add_copyright_tags,
                 ), cwd=ROOT,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 encoding="utf-8", errors="replace", **options,

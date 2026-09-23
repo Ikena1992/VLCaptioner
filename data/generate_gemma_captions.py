@@ -324,7 +324,7 @@ def process_image(
     write_result(image_path, short_text, long_text, load_artist_names(image_path))
 
 
-def build_image_finalizer(add_year_tag=False):
+def build_image_finalizer(add_year_tag=False, add_copyright_tags=False):
     """Return a per-image finisher that reuses the tagger's run-level RNG state."""
     tag_rng = random.Random(tag_files.RANDOM_SEED)
     dropout_rng = random.Random(tag_files.DROPOUT_SEED)
@@ -347,6 +347,7 @@ def build_image_finalizer(add_year_tag=False):
             dropout_protected_tags,
             report_success=False,
             add_year_tag=add_year_tag,
+            add_copyright_tags=add_copyright_tags,
         ):
             raise RuntimeError(f"Could not create tag file for {image_path.name}")
         if not finalizer.process_caption_pair(
@@ -365,6 +366,7 @@ def main(argv=None):
         help="Regenerate and replace cached short and long captions.",
     )
     parser.add_argument("--add-year-tag", action="store_true", help="Add post upload year to .tag files.")
+    parser.add_argument("--add-copyright-tags", action="store_true", help="Add copyright/series tags to .tag files.")
     args = parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
@@ -384,7 +386,7 @@ def main(argv=None):
     finalizer.recover_publications()
     for journal in finalizer.DONE_DIR.glob(".finalize-*/committed.json"):
         finalizer.finish_cleanup(journal.parent)
-    finish_image = build_image_finalizer(args.add_year_tag)
+    finish_image = build_image_finalizer(args.add_year_tag, args.add_copyright_tags)
     local_stems = {
         image.stem.lower()
         for image in IMAGES_DIR.glob("*.*")
