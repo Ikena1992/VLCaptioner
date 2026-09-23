@@ -1,3 +1,4 @@
+from source_tag_file import read_source_tags
 from pathlib import Path
 import csv
 import html
@@ -678,7 +679,7 @@ def build_gemma_prompts(
     if tag_file.exists():
         raw_tags = [
             t.strip()
-            for t in tag_file.read_text(encoding="utf-8").split(",")
+            for t in read_source_tags(tag_file.read_text(encoding="utf-8")).split(",")
             if t.strip()
         ]
 

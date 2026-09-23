@@ -1,3 +1,4 @@
+from source_tag_file import read_source_tags
 import argparse
 from pathlib import Path
 
@@ -262,11 +263,12 @@ def find_images_with_txt(image_folder: Path) -> list[Path]:
 
 
 def split_tags(content: str) -> list[str]:
-    return [tag.strip() for tag in content.replace("\n", ",").split(",") if tag.strip()]
+    return [tag.strip() for tag in read_source_tags(content).replace("\n", ",").split(",") if tag.strip()]
 
 
 def append_missing_tags(txt_path: Path, predicted_tags: list[str]) -> list[str]:
-    existing_tags = split_tags(txt_path.read_text(encoding="utf-8-sig"))
+    original_content = txt_path.read_text(encoding="utf-8-sig")
+    existing_tags = split_tags(original_content)
     existing_normalized = {normalize_tag_for_compare(tag) for tag in existing_tags}
     missing_tags = []
 
@@ -277,7 +279,8 @@ def append_missing_tags(txt_path: Path, predicted_tags: list[str]) -> list[str]:
             existing_normalized.add(normalized)
 
     if missing_tags:
-        txt_path.write_text(", ".join([*existing_tags, *missing_tags]), encoding="utf-8")
+        metadata_suffix = original_content[len(read_source_tags(original_content)): ]
+        txt_path.write_text(", ".join([*existing_tags, *missing_tags]) + metadata_suffix, encoding="utf-8")
 
     return missing_tags
 

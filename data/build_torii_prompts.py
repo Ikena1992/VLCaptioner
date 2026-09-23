@@ -1,3 +1,4 @@
+from source_tag_file import read_source_tags
 from pathlib import Path
 import csv
 import sqlite3
@@ -119,7 +120,7 @@ def build_torii_prompts(
         return None
 
     raw_tags = [
-        t.strip() for t in tag_file.read_text(encoding="utf-8").split(",") if t.strip()
+        t.strip() for t in read_source_tags(tag_file.read_text(encoding="utf-8")).split(",") if t.strip()
     ]
     # ---------------- Characters ----------------
     characters_raw, artists_raw = load_local_metadata(image_path)

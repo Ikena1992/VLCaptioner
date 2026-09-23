@@ -6,6 +6,7 @@ import time
 from tqdm import tqdm
 from danbooru_client import danbooru_get
 from danbooru_cache import TagCategoryCache
+from source_tag_file import read_source_tags, read_source_metadata
 
 # Paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +44,7 @@ CSV_FIELDNAMES = [
     "score",
     "quality tag",
     "created_at",
+    "year tag",
 ]
 
 
@@ -174,7 +176,7 @@ def split_txt_tags(content):
     """Split a TXT file's comma-separated tags."""
     return [
         t.strip()
-        for t in content.split(",")
+        for t in read_source_tags(content).split(",")
         if t.strip()
     ]
 
@@ -251,6 +253,7 @@ def tags_to_csv_row(md5_name, tags):
         "score": "",
         "quality tag": ", ".join(quality),
         "created_at": "",
+        "year tag": "",
     }
 
 
@@ -284,8 +287,17 @@ for filename in tqdm(txt_files, desc="Processing TXT files"):
 
     tags = split_txt_tags(content)
     try:
-        row = tags_to_csv_row(md5_name, tags)
-    except RuntimeError as error:
+        metadata = read_source_metadata(content)
+        if metadata is not None:
+            row = {key: str(metadata.get(key, "")) for key in CSV_FIELDNAMES}
+            row["md5"] = md5_name
+            original = {tag.casefold() for key in ("characters", "copyright", "artists", "general", "meta", "safety tags", "quality tag", "period") for tag in split_txt_tags(row[key])}
+            additions = [tag for tag in tags if tag.casefold() not in original]
+            if additions:
+                row["general"] = ", ".join(filter(None, [row["general"], *additions]))
+        else:
+            row = tags_to_csv_row(md5_name, tags)
+    except (RuntimeError, ValueError) as error:
         unresolved_files += 1
         print(f"Skipping {filename}: {error}. It will be retried next run.")
         continue

@@ -1,3 +1,4 @@
+from source_tag_file import read_source_tags
 import os
 import re
 import logging
@@ -131,8 +132,7 @@ def load_tags_from_folder(folder):
     for filename in os.listdir(folder):
         if filename.endswith(".txt"):
             with open(os.path.join(folder, filename), "r", encoding="utf-8") as f:
-                for line in f:
-                    tags.update(t.strip() for t in line.split(",") if t.strip())
+                tags.update(t.strip() for t in read_source_tags(f.read()).split(",") if t.strip())
     return sorted(tags)
 
 # -------------------------------

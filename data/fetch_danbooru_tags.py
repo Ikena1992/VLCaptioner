@@ -9,6 +9,7 @@ from tqdm import tqdm
 from danbooru_client import danbooru_get
 from gelbooru_client import lookup_gelbooru
 from year_tags import get_year_tag
+from source_tag_file import write_source_tags, read_source_metadata
 
 # ---------------- CONFIG ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))  # script location
@@ -71,16 +72,19 @@ def save_tags(md5_hash, tags, overwrite_existing_txt=False):
             old = next(csv.DictReader(handle), {})
         row.update({key: value for key, value in old.items() if key and value})
     row["quality tag"] = normalize_quality_tag(row["quality tag"])
+    if overwrite_existing_txt or not os.path.exists(txt_path):
+        all_tags = [row[key] for key in ("characters", "copyright", "artists", "general", "meta", "safety tags", "quality tag") if row[key]]
+        Path(txt_path).write_text(write_source_tags(", ".join(all_tags), row), encoding="utf-8")
+        csv_row = read_source_metadata(Path(txt_path).read_text(encoding="utf-8"))
+    else:
+        csv_row = row
     temporary = Path(csv_path + ".tmp")
     with temporary.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(row))
+        writer = csv.DictWriter(handle, fieldnames=list(csv_row))
         writer.writeheader()
-        writer.writerow(row)
+        writer.writerow(csv_row)
     temporary.replace(csv_path)
 
-    if overwrite_existing_txt or not os.path.exists(txt_path):
-        all_tags = [row[key] for key in ("characters", "copyright", "artists", "general", "safety tags", "quality tag") if row[key]]
-        Path(txt_path).write_text(", ".join(all_tags), encoding="utf-8")
 
 # ---------------- MAIN ----------------
 def main(overwrite_existing_txt=False):

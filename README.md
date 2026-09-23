@@ -275,7 +275,17 @@ Each completed image has these companion files in `done/`:
 | `NAME.long` | Detailed natural-language caption. |
 | `NAME.tag` | Cleaned and ordered Danbooru-style tags. |
 | `NAME.combined` | Tag caption followed by the short caption. |
-| `NAME.txt` | Source tags. |
+| `NAME.txt` | All fetched source tags, followed by a structured record of the booru metadata used to rebuild the CSV. Plain tag-only files remain supported. |
+
+The `.tag` generator intentionally drops most booru meta tags. It includes
+only medium-related meta tags, such as `watercolor (medium)` and
+`traditional media`; resolution tags such as `highres` are not needed for
+training. The fetched meta tags remain available in the CSV until finalization.
+Fetched `.txt` files retain the complete meta list as well. The pipeline keeps
+the structured record out of prompts and tag matching; it reads that record to
+restore post ID, source, score, rating, date, and tag categories when rebuilding
+a missing CSV. WD14 additions to the visible tag list are retained as general
+tags in a rebuilt CSV. Older tag-only `.txt` files still use category lookup.
 
 Generated captions can contain errors and benefit from review before training.
 
