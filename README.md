@@ -236,8 +236,8 @@ supply generated character references.
 
 Torii then produces visual analysis, which is normalized and passed to the
 refinement model. The final stage creates long and short captions, cleans the
-tags, and saves each completed asset set in `done/`. The pipeline then scans
-long captions for runaway text and quarantines affected image sets. Existing
+tags, and saves each completed asset set in `done/`. The pipeline then checks
+captions for definite failures and moves affected image sets to `captionReview/`. Existing
 caches are reused when available.
 
 ### Stopping and resuming
@@ -281,13 +281,16 @@ done/sample.txt       1girl, blue_hair, outdoors
 done/sample.webp      The processed image
 ```
 
-### Runaway caption quarantine
+### Caption quality review
 
-After captioning, the GUI and command-line pipeline scan `.long` files in
-`done/`. A caption with more than 250 words between sentence breaks is treated
-as runaway output. Its `.long`, `.short`, `.tag`, and `.combined` files, image,
-and source `.txt` file (when present) move to `runawayCaptions/`, leaving no
-files for that image in `done/`.
+After captioning, the GUI and command-line pipeline check caption sets in
+`done/`. Missing or empty `.short`/`.long` captions, leaked control text such
+as `END_CAPTION` or `<think>`, or more than 250 words between sentence breaks in a long caption
+trigger review. The image and its companion files move together to
+`captionReview/`. The pipeline log shows each image and the reason, followed
+by a count of each failure type. Suspicious but uncertain wording is not moved.
+Run `python data/quarantine_runaway_captions.py --dry-run` to preview findings
+without moving files.
 
 ## Optional tools
 

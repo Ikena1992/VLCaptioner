@@ -61,25 +61,26 @@ MULTI_CHARACTER_TAGS = {
 }
 
 TEXT_EXACT_TAGS = {
-    "text",
-    "signature",
-    "username",
     "speech bubble",
-    "body writing",
-    "clothes writing",
-    "patreon username",
+    "thought bubble",
     "artist name",
+    "character name",
+    "copyright name",
+    "company name",
+    "commissioner name",
+    "name tag",
     "sign",
     "holding sign",
-    "chinese zodiac",
+    "road sign",
+    "open sign",
+    "sign around neck",
 }
 
-TEXT_PARTIAL_KEYWORDS = {
+TEXT_WORDS = {
     "text",
-    "name",
     "writing",
     "username",
-    "sign",
+    "signature",
 }
 
 CHARACTER_EXCLUSIONS = {
@@ -353,7 +354,7 @@ def load_character_data(
 def detect_text(raw_tags_set: set[str]) -> bool:
     return any(
         tag in TEXT_EXACT_TAGS
-        or any(keyword in tag for keyword in TEXT_PARTIAL_KEYWORDS)
+        or not TEXT_WORDS.isdisjoint(tag.split())
         for tag in raw_tags_set
     )
 
@@ -456,9 +457,11 @@ def build_character_descriptions_section(
         return ""
 
     lines = [
-        "# Ground-truth character references\n"
-        "These descriptions help match authorized characters to visible "
-        "subjects. They cannot authorize or introduce additional names.\n"
+        "# Character references\n"
+        "Use these descriptions to match names in <ground_truth_characters> "
+        "to subjects in the image. Do not introduce other names from these "
+        "references. Describe the hairstyle, clothing, accessories, and colors "
+        "visible in the image, even when they differ from these descriptions.\n"
     ]
 
     for character_name, description in character_descriptions:
@@ -472,30 +475,28 @@ def build_character_authority_policy(character_names: list[str]) -> str:
     if character_names:
         names = "\n".join(character_names)
         return (
-            "# Ground-truth character policy\n"
-            "The per-image metadata is authoritative and always correct. "
-            "The following list contains every character name permitted in "
-            "the final captions:\n"
+            "# Character names\n"
+            "This list is authoritative and contains every permitted "
+            "character name. Include each name exactly as listed at least "
+            "once in the caption. Use these names instead of generic terms "
+            "for the corresponding subjects:\n"
             "<ground_truth_characters>\n"
             f"{names}\n"
             "</ground_truth_characters>\n"
-            "Character identities proposed by the Torii report are untrusted "
-            "visual guesses. Never use a Torii-proposed name that is absent "
-            "from <ground_truth_characters>. Treat such a subject as an "
-            "original unnamed character and use an appropriate generic term. "
-            "If Torii assigns an authorized name to the wrong visible subject, "
-            "correct the assignment using the metadata references, visible "
-            "traits, and spatial position.\n\n"
+            "Discard names in the Torii report that are not in this list. "
+            "Use generic terms for subjects without a listed name. Match "
+            "listed names to subjects using visible traits, spatial position, "
+            "and character references when supplied; correct any mismatched "
+            "names in the Torii report.\n\n"
         )
 
     return (
-        "# Ground-truth character policy\n"
-        "The per-image metadata is authoritative and confirms that no known "
-        "named character is present.\n"
+        "# Character names\n"
+        "No character names are supplied for this image.\n"
         "<ground_truth_characters>\nNone\n</ground_truth_characters>\n"
-        "Discard every character name proposed by the Torii report. Describe "
-        "all subjects as original unnamed characters using appropriate generic "
-        "terms. Do not use any character name in either final caption.\n\n"
+        "Discard every character name in the Torii report and describe "
+        "subjects using appropriate generic terms. Do not use character "
+        "names in the caption.\n\n"
     )
 
 
@@ -511,69 +512,44 @@ def build_caption_prompts(
 ) -> dict[str, str]:
 
     common_rules = [
-        "Write a standalone natural-language description of the visible scene "
-        "that can serve as factual training data. A reader must be able to "
-        "understand the scene without seeing the tags or source reports. ",
-        "Use the supplied image as the primary visual source and the Torii "
-        "report as a detailed secondary source. Correct Torii whenever it "
-        "conflicts with the ground-truth metadata. ",
+        "Write a factual scene description for training an image model. ",
+        "Treat the supplied tags in <ground_truth_tags> as authoritative "
+        "facts, not a complete list of scene details. A missing tag does "
+        "not mean the corresponding detail is absent. "
+        "Preserve the Torii report's descriptions of nudity, exposed anatomy, "
+        "sexual poses and actions, penetration, bodily contact, fluids, sex "
+        "toys, and restraints unless they contradict the tags. Do not remove "
+        "these details just because you cannot recognize them in the image. "
+        "Use the image to correct and expand the remaining scene details. ",
+        "Describe details supported by the image, the tags, or the Torii "
+        "report according to those priorities. Do not invent hidden anatomy, "
+        "clothing, objects, or actions. Describe visible crops and overlaps "
+        "without guessing what lies behind them. ",
+        "Use direct, specific wording for actions and anatomy. State who does "
+        "what to whom, including the body parts and contact specified by the "
+        "tags or Torii report. Do not soften these facts, replace them with "
+        "vague terms, or qualify them with 'seems', 'possibly', or 'suggests'. ",
         "Use the framing term 'close-up' only when the exact ground-truth tag "
-        "'close-up' appears in <ground_truth_tags>. If that tag is absent, do "
-        "not use 'close-up' or describe the scene as a close-up, even if the "
-        "image or Torii report suggests tight framing. ",
-        "Use the ground-truth tags to confirm identities, counts, central "
-        "actions, important relationships, defining traits, and preferred "
-        "terminology. Integrate useful tag concepts into grammatical sentences; "
-        "do not translate the full tag list, enumerate keywords, use tag-list "
-        "syntax, or insert a tag that does not improve the description. ",
-        "Describe visible content factually in connected prose and preserve "
-        "spatial and physical relationships. Treat position as essential "
-        "training data, not optional embellishment. Prefer relational statements "
-        "such as who is doing what, where, and to whom over inventories of traits. ",
-        "Do not mention that this is an image, anime, artwork, illustration, "
-        "masterpiece, 8k, high-resolution, or a detailed description. ",
-        "Avoid subjective praise, emotional interpretation, and purple prose. ",
-        "Never mention ground truth, tags, metadata, instructions, prompts, "
-        "rules, the Torii report, or what any source says, confirms, implies, "
-        "or suggests. State the supported visual facts themselves directly. ",
-        "Preserve all factual NSFW information present in the image, Torii "
-        "report, or ground-truth tags. Never sanitize, censor, euphemize, or "
-        "generalize explicit content. Treat visible nudity, exposed anatomy, "
-        "sexual poses, sexual contact or acts, penetration, bodily fluids, "
-        "sex toys, restraints, and interactions between specific body parts "
-        "as important visual facts. Use direct, concrete wording. Do not add "
-        "an explicit detail unless it is supported by the image, report, or "
-        "ground-truth tags. ",
-        "Use ground-truth tags to preserve central acts, positions, contact, "
-        "and explicit anatomical states. The short and long tasks below define "
-        "how much supporting detail each caption should retain. Integrate facts "
-        "into the scene description rather than appending keywords or replacing "
-        "specific concepts with vague descriptions. ",
-        "Treat ground-truth sexual facts as confirmed, not uncertain visual "
-        "guesses. Never qualify them with 'appears to', 'seems to', 'suggests', "
-        "'implies', 'possibly', or similar hedging. Use an explicit relational "
-        "statement that identifies who performs the act with whom, the exact "
-        "act, the involved anatomy, and penetration or contact when specified. "
-        "Do not substitute 'sexual activity', 'sexual contact', 'intimate act', "
-        "or 'suggestive pose' for a more specific ground-truth term. ",
-        "Output only the caption text with no heading, preamble, explanation, "
-        "bullet list, Markdown, quotation around the whole caption, or notes. ",
-        "After the caption, output END_CAPTION and stop. ",
+        "'close-up' appears in <ground_truth_tags>. Otherwise, do not use "
+        "that term, even if the image or Torii report suggests tight framing. ",
+        "Write connected natural prose. Integrate relevant tags into sentences "
+        "instead of listing keywords. Keep each attribute attached to the "
+        "correct subject and describe spatial and physical relationships clearly. ",
+        "State scene facts directly. Do not refer to the tags, metadata, "
+        "character references, Torii report, instructions, or source priorities "
+        "in the caption. Do not begin with 'The image' or 'This image'. ",
+        "Do not call the scene an image, anime, artwork, or illustration. "
+        "Omit quality labels such as 'masterpiece', '8k', or 'high-resolution', "
+        "subjective praise, emotional interpretation, and flowery language. ",
+        "Omit statements about absent text, speech bubbles, logos, props, or "
+        "other elements, even if the Torii report includes them. Describe "
+        "plain backgrounds and empty space by their visible color and layout. ",
+        "Each sentence should add information. Omit repeated facts, concluding "
+        "summaries, and statements that nothing else is present. ",
+        "Output only the caption, followed by END_CAPTION, then stop. Do not "
+        "include headings, bullet lists, Markdown, explanations, notes, or "
+        "quotation marks around the whole caption. ",
     ]
-
-    if character_names:
-        common_rules.append(
-            "Every authorized metadata character name must appear verbatim at "
-            "least once in each caption. Use the "
-            "authorized name instead of replacing that character with a generic "
-            "term such as woman, girl, man, boy, person, or character. Do not use "
-            "any character name proposed only by Torii. "
-        )
-    else:
-        common_rules.append(
-            "No named character is authorized. Discard all names proposed by "
-            "Torii and describe every subject with an appropriate generic term. "
-        )
 
     if has_multi or len(character_names) > 1:
         common_rules.append(
@@ -583,9 +559,12 @@ def build_caption_prompts(
 
     if has_text:
         common_rules.append(
-        "When visible text is important to the scene, transcribe it in double "
-        "quotation marks and state its position. The short and long tasks below "
-        "define how much text detail to retain. "
+            "For writing included in the caption, transcribe clearly legible "
+            "text exactly in double quotation marks and identify its location. "
+            "For visible but unreadable writing, "
+            "describe its placement and appearance without guessing the "
+            "wording. When writing is absent, omit the topic entirely. Follow "
+            "the writing coverage specified in the caption task below. "
         )
 
     if not character_names:
@@ -593,11 +572,11 @@ def build_caption_prompts(
             common_rules.append("Refer to the unnamed character as a furry. ")
         if "loli" in raw_tags_set:
             common_rules.append(
-                'The ground-truth tag "loli" is present; use the exact word "loli". '
+                'The supplied tags include "loli"; use the exact word "loli". '
             )
         if "shota" in raw_tags_set:
             common_rules.append(
-                'The ground-truth tag "shota" is present; use the exact word "shota". '
+                'The supplied tags include "shota"; use the exact word "shota". '
             )
 
     context = [
@@ -620,23 +599,13 @@ def build_caption_prompts(
     context.append("".join(common_rules))
     shared_context = "".join(context)
 
-    short_rules = []
-
-    if character_names:
-        short_rules.append(
-            "In this short caption, name every authorized character at least "
-            f"once using these exact names: {', '.join(character_names)}. "
-        )
-
-    if "no humans" in raw_tags_set:
-        short_rules.append("Write a compact, information-dense short caption. ")
-    else:
-        short_rules.append(
-            "Write a compact, information-dense short caption. Prioritize the "
-            "main subjects, their defining appearance, central action or pose, "
-            "and the one or two spatial relationships needed to understand the scene. "
-        )
-
+    short_rules = [
+        "Write one compact paragraph, usually 40-70 words. Never exceed 85 "
+        "words unless required character names or visible text make that "
+        "impossible. Include only the scene's essential facts: main subjects, "
+        "defining appearance, central action or pose, and the setting and "
+        "relationships needed to understand the scene. ",
+    ]
     short_rules.extend(
         get_sentence_rules(
             character_count=len(character_names),
@@ -645,77 +614,45 @@ def build_caption_prompts(
             raw_tags_set=raw_tags_set,
         )
     )
-
     short_rules.append(
-        "Use one paragraph and usually 40-70 words. Never exceed 85 words unless "
-        "that is strictly necessary to name every required character or transcribe "
-        "visible text; even then, use the fewest words possible. Prefer 1-2 natural "
-        "sentences for simple scenes. Treat the supplied long caption, when present, "
-        "as a scene reference and summarize it without contradicting or introducing "
-        "facts. Include only the scene's essential facts: the main subjects, defining "
-        "visible traits, central action or pose, and setting when it changes the "
-        "meaning. Omit secondary clothing details, minor props, decorative background "
-        "elements, lighting nuances, and additional spatial relations unless they are "
-        "needed to distinguish the scene. Mention visible text only when it is central "
-        "to the scene. Retain only the tag concepts needed to identify the primary "
-        "action and subjects. When the ground-truth tags contain explicit content, state "
-        "the exact central NSFW act, exposed anatomy, and involved characters directly "
-        "before spending words on clothing or background; these facts must not be "
-        "omitted, generalized, or hedged. Avoid compressed adjective chains and "
-        "comma-separated inventories. Do not "
-        "begin with 'The image' or 'This image'. "
+        "If <long_caption> is supplied, summarize it according to the source "
+        "priorities above without adding facts. Preserve the central actions, "
+        "exposed anatomy, and involved subjects specified by the tags or Torii "
+        "report; state them before secondary appearance or setting details. "
+        "Omit secondary clothing details, minor props, decorations, lighting "
+        "nuances, and extra spatial relations unless needed to distinguish the "
+        "scene. Mention writing only when central to the scene. Use full "
+        "sentences rather than compressed adjective chains. "
     )
 
     long_rules = [
-        (
-            "In this long caption, name every authorized character at least "
-            f"once using these exact names: {', '.join(character_names)}. "
-            if character_names
-            else ""
-        ),
-        "Write the long caption as the exhaustive, reconstruction-oriented source "
-        "description. It must cover the full scene rather than summarize it. Write in "
-        "connected natural prose. The goal is to let a reader or generative model "
-        "reconstruct the composition as closely as possible from the caption. "
-        "Begin with a concise map of the whole composition: camera angle and "
-        "framing, foreground/midground/background, and what occupies the left, "
-        "center, right, top, and bottom of the frame. Then cover each important "
-        "character's identity or generic designation, defining appearance, "
-        "clothing, expression, gaze, pose, actions, held objects, interactions, "
-        "background, lighting, and relevant visible text. Focus on details that "
-        "distinguish this scene rather than exhaustively verbalizing every tag. ",
-        "For every visible person or character, state their frame position, depth, "
-        "facing direction, body orientation, posture, gaze, limb and hand placement, "
-        "and position relative to other subjects and nearby objects. Explicitly "
-        "describe contact, overlap, occlusion, containment, support, and who or what "
-        "is in front of, behind, above, below, beside, between, inside, or touching "
-        "something else. Use viewer-relative left and right for image placement; "
-        "use a subject's left or right only when anatomy requires it and label it "
-        "clearly. Do not invent exact measurements, but use approximate regions, "
-        "distances, scale, and relative size when visible. ",
-        "Describe every clearly visible scene element that materially affects "
-        "reconstruction, including furniture, props, architecture, landscape, "
-        "decorations, effects, shadows, reflections, and visible text. Anchor each "
-        "item to an image region or nearby subject instead of listing objects "
-        "without locations. State important colors, shapes, orientations, counts, "
-        "patterns, and partially obscured or cropped elements. Explain empty space "
-        "and background layout when those define the composition. ",
-        "Give each subject enough individual detail to reproduce their appearance "
-        "and role, including hair, face, expression, body traits, clothing layers, "
-        "accessories, and held objects, while keeping each detail attached to its "
-        "owner. Scale the caption to the scene, but omit a visible detail only when "
-        "it is genuinely too small or ambiguous to describe reliably. Before "
-        "finishing, mentally scan the frame from top-left to bottom-right and add "
-        "any clearly visible person, item, spatial relation, crop, or background "
-        "feature not yet covered. ",
-        "Describe every supported explicit anatomical and sexual detail from "
-        "the Torii report and ground-truth tags, including who does what to "
-        "whom and the relevant body parts, poses, contact, fluids, and objects. ",
-        "State confirmed ground-truth acts early and concretely before less "
-        "important atmosphere, lighting, clothing, or background details. ",
-        "Use natural paragraphs or one long paragraph. Avoid repetition, "
-        "speculation, tag-list phrasing, and serial adjective inventories. ",
-        "Do not begin with 'The image' or 'This image'. ",
+        "Write a thorough, detailed description of the full scene in natural "
+        "paragraphs. Include all supported details useful for reconstructing "
+        "the subjects and composition. Let scene complexity determine length; "
+        "do not compress the description into a summary. ",
+        "Begin with the main subjects, central action or pose, camera angle, "
+        "and framing. Locate subjects and objects across the frame and in "
+        "depth where relevant. State actions specified by the tags or Torii "
+        "report before secondary clothing, lighting, or background details. ",
+        "Describe each subject's hair, face, body traits, clothing layers, "
+        "accessories, expression, gaze, pose, body orientation, and limb and "
+        "hand placement where supported. Keep each subject's details together "
+        "and distinguish subjects by name or visible features. ",
+        "Describe actions and relationships precisely: contact, overlap, "
+        "occlusion, support, containment, and relative positions. Use the "
+        "viewer's left and right for placement in the frame. If referring to "
+        "a subject's own left or right, say so explicitly. Use visible relative "
+        "sizes and distances without inventing exact measurements. ",
+        "Describe held objects, furniture, architecture, landscape, decorations, "
+        "effects, lighting, shadows, reflections, and visible writing where "
+        "present. Locate each element relative to the frame or a nearby "
+        "subject. Include its relevant colors, shapes, patterns, orientation, "
+        "and count. Describe cropped and partly hidden elements only to the "
+        "extent supported by the supplied sources. ",
+        "Retain the specific anatomical details, actions, contact, fluids, "
+        "and related objects supplied by the tags and Torii report according "
+        "to the source priorities above. Omit details that are too small or "
+        "ambiguous to identify and are not established by those sources. ",
     ]
 
     return {

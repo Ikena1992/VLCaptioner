@@ -249,11 +249,10 @@ def generate_caption(
     prompt = prompts[image_path][kind]
     if kind == "short" and long_caption:
         prompt += (
-            "\n\n# Authoritative long caption to summarize\n<long_caption>\n"
+            "\n\n# Long caption to summarize\n<long_caption>\n"
             f"{normalize_caption_output(long_caption)}\n</long_caption>\n"
-            "Write a faithful 40-70 word summary, never exceeding 85 words unless "
-            "required names or visible text make that impossible. Preserve central "
-            "subjects, actions, relationships, explicit concepts, and composition."
+            "Summarize this caption using the short-caption task and source "
+            "priorities above."
         )
     cached = None
     if not overwrite_caption_cache:

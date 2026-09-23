@@ -466,8 +466,8 @@ def build_terminology_section(raw_tags: list[str]) -> str:
     exact_section = ""
     if terms:
         exact_section = (
-            "# Important terminology anchors\n"
-            "The phrases below name important confirmed visual concepts. "
+            "# Required terminology\n"
+            "The phrases below come from the supplied tags. "
             "Include each concept when describing the relevant subject or "
             "action, and preserve the listed phrase when it fits naturally. "
             "Minor grammatical inflection is allowed when needed for fluent "
@@ -488,10 +488,11 @@ def build_terminology_section(raw_tags: list[str]) -> str:
                 f"{', '.join(required_words)}"
             )
         relational_section = (
-            "# Relational ground-truth concepts\n"
+            "# Action relationships\n"
             "In these tags, 'another' and 'own' are relationship placeholders, "
             "not literal caption words. Resolve actor and target from the image, "
-            "Torii report, and authorized character metadata. Replace each "
+            "Torii report, and names in <ground_truth_characters>, following "
+            "the source priorities in the caption rules. Replace each "
             "placeholder with a character name or an unambiguous possessive "
             "pronoun. Use the template grammatically and preserve its listed "
             "action/body-part words. Never write 'another's' when the target "
