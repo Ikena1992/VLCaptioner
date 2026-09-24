@@ -313,7 +313,7 @@ def save_tags(md5_hash, tags):
     txt_path = os.path.join(IMAGE_FOLDER, f"{md5_hash}.txt")
 
     score = tags.get("score", 0)
-    quality_tag = get_quality_tag(score)
+    quality_tag = get_quality_tag(score, tags.get("rating"))
 
     period_tag = get_period_tag(tags.get("created_at", ""))
 

@@ -73,6 +73,8 @@ def lookup_gelbooru(md5_hash):
         **{category: " ".join(tags) for category, tags in groups.items()},
         "source": "gelbooru", "post_id": post.get("id", ""),
         "post_source": unescape(post.get("source", "")),
-        "rating": {"general": "g", "safe": "g", "sensitive": "s", "questionable": "q", "explicit": "e"}.get(rating, rating),
+        # Gelbooru's former "safe" rating was renamed "sensitive" when
+        # "general" was introduced as the fully work-safe category.
+        "rating": {"general": "g", "safe": "s", "sensitive": "s", "questionable": "q", "explicit": "e"}.get(rating, rating),
         "score": int(post.get("score", 0)), "created_at": created_at,
     }

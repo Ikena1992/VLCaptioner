@@ -357,6 +357,11 @@ The optional year tag uses the matched post's upload year and is omitted when
 the source has no usable date. The pipeline does not generate aesthetic score
 tags such as `score_1` through `score_9`; post scores only determine quality
 labels such as `good quality`.
+
+Quality thresholds depend on the post rating. For general and sensitive posts,
+scores above 130 receive `masterpiece`; for questionable and explicit posts,
+scores above 230 receive it. The remaining quality ranges are scaled in the
+same proportion. Unknown ratings use the questionable/explicit thresholds.
 Existing TXT files are still skipped unless `--overwrite-danbooru-txt` is used.
 The standalone refresh script also uses this fallback.
 If Gelbooru requires authentication, add `GELBOORU_USER_ID` and `GELBOORU_API_KEY`

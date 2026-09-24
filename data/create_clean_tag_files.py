@@ -401,8 +401,8 @@ def build_tag_list(
     """Build the final ordered tag list from one CSV row."""
     # [quality tag]
     quality_tag = get_column(row, "quality tag", "quality")
-    if not quality_tag and DERIVE_QUALITY_FROM_SCORE_IF_MISSING:
-        quality_tag = get_quality_tag(get_column(row, "score"))
+    if DERIVE_QUALITY_FROM_SCORE_IF_MISSING:
+        quality_tag = get_quality_tag(get_column(row, "score"), get_column(row, "rating")) or quality_tag
     quality_tags = [normalize_quality_tag(quality_tag)] if quality_tag else []
 
     # [metatags]

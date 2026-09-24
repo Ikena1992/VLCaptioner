@@ -48,7 +48,7 @@ def save_tags(md5_hash, tags, overwrite_existing_txt=False):
     txt_path = os.path.join(IMAGE_FOLDER, f"{md5_hash}.txt")
 
     score = tags.get("score", 0)
-    quality_tag = get_quality_tag(score)
+    quality_tag = get_quality_tag(score, tags.get("rating"))
 
     row = {
         "md5": md5_hash,
@@ -70,7 +70,7 @@ def save_tags(md5_hash, tags, overwrite_existing_txt=False):
         with open(csv_path, newline="", encoding="utf-8-sig") as handle:
             old = next(csv.DictReader(handle), {})
         row.update({key: value for key, value in old.items() if key and value})
-    row["quality tag"] = normalize_quality_tag(row["quality tag"])
+    row["quality tag"] = get_quality_tag(row.get("score"), row.get("rating")) or normalize_quality_tag(row["quality tag"])
     if overwrite_existing_txt or not os.path.exists(txt_path):
         all_tags = [row[key] for key in ("characters", "copyright", "artists", "general", "meta", "safety tags", "quality tag") if row[key]]
         Path(txt_path).write_text(", ".join(all_tags) + "\n", encoding="utf-8")

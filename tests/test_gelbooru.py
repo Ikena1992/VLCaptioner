@@ -10,6 +10,12 @@ import fetch_danbooru_tags as fetch
 
 
 class GelbooruTests(unittest.TestCase):
+    def test_legacy_safe_rating_maps_to_sensitive(self):
+        md5 = "a" * 32
+        with tempfile.TemporaryDirectory() as directory, patch.object(client, "CACHE_PATH", Path(directory) / "types.sqlite3"):
+            with patch.object(client, "gelbooru_get", return_value={"post": [{"md5": md5, "rating": "safe", "tags": "", "score": 10}]}):
+                self.assertEqual(client.lookup_gelbooru(md5)["rating"], "s")
+
     def test_categories_persist_across_lookups(self):
         md5 = "a" * 32
         post = {"post": [{"md5": md5, "id": 12, "tags": "some_artist some_character sky",
