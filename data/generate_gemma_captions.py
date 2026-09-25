@@ -150,7 +150,7 @@ def add_artist_prefix(caption, artist_names):
     return prefix + caption
 
 
-def write_result(image_path, short_text, long_text, artist_names=None):
+def write_result(image_path, short_text, long_text, artist_names=None, preserve_existing_long=False):
     """Write both results; the SQLite request cache is managed separately."""
     short_text = normalize_caption_output(short_text)
     long_text = normalize_caption_output(long_text)
@@ -160,7 +160,8 @@ def write_result(image_path, short_text, long_text, artist_names=None):
     short_text = add_artist_prefix(short_text, artist_names)
     long_text = add_artist_prefix(long_text, artist_names)
     image_path.with_suffix(".short").write_text(short_text + "\n", encoding="utf-8")
-    image_path.with_suffix(".long").write_text(long_text + "\n", encoding="utf-8")
+    if not preserve_existing_long:
+        image_path.with_suffix(".long").write_text(long_text + "\n", encoding="utf-8")
 
 
 def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=False):
@@ -184,8 +185,7 @@ def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=Fa
             continue
         short_path, long_path = image.with_suffix(".short"), image.with_suffix(".long")
         complete = (
-            not overwrite_caption_cache
-            and all(path.exists() and path.read_text(encoding="utf-8-sig").strip() for path in (short_path, long_path))
+            all(path.exists() and path.read_text(encoding="utf-8-sig").strip() for path in (short_path, long_path))
         )
         torii_path = image.with_suffix(".toriiOutput")
         uses_parquet = image.stem.lower() in parquet_captions
@@ -291,11 +291,8 @@ def process_image(
     context_size=DEFAULT_CAPTION_CONTEXT_SIZE,
 ):
     long_path = image_path.with_suffix(".long")
-    long_text = (
-        ""
-        if overwrite_caption_cache
-        else long_path.read_text(encoding="utf-8-sig").strip() if long_path.exists() else ""
-    )
+    long_text = long_path.read_text(encoding="utf-8-sig").strip() if long_path.exists() else ""
+    reuse_existing_long = bool(long_text)
     if not long_text:
         image_path.with_suffix(".short").unlink(missing_ok=True)
         long_text = parquet_captions.get(image_path.stem.lower(), "")
@@ -310,7 +307,8 @@ def process_image(
             context_size=context_size,
         )
     long_text = normalize_caption_output(long_text)
-    long_path.write_text(long_text + "\n", encoding="utf-8")
+    if not reuse_existing_long:
+        long_path.write_text(long_text + "\n", encoding="utf-8")
     short_text = generate_caption(
         client,
         image_path,
@@ -321,7 +319,10 @@ def process_image(
         overwrite_caption_cache=overwrite_caption_cache,
         context_size=context_size,
     )
-    write_result(image_path, short_text, long_text, load_artist_names(image_path))
+    write_result(
+        image_path, short_text, long_text, load_artist_names(image_path),
+        preserve_existing_long=reuse_existing_long,
+    )
 
 
 def build_image_finalizer(add_year_tag=False, add_copyright_tags=False):
@@ -363,7 +364,7 @@ def main(argv=None):
     parser.add_argument(
         "--overwrite-caption-cache",
         action="store_true",
-        help="Regenerate and replace cached short and long captions.",
+        help="Bypass cached captions when a caption file is missing; keep existing caption files.",
     )
     parser.add_argument("--add-year-tag", action="store_true", help="Add post upload year to .tag files.")
     parser.add_argument("--add-copyright-tags", action="store_true", help="Add copyright/series tags to .tag files.")

@@ -240,7 +240,7 @@ image files.
 | --- | --- | --- |
 | **Add high-confidence WD14 tags to existing tag files** | Appends missing high-confidence tags. | Leaves existing tag files unchanged. Images without tags are tagged either way. |
 | **Replace existing tags with fresh Danbooru or Gelbooru tags** | Replaces matching source tags with tags from the first matching post. | Keeps existing tag files and skips their lookup. |
-| **Regenerate cached captions** | Generates short and long captions again. | Reuses cached captions when available. |
+| **Regenerate cached captions** | Bypasses the caption cache when a caption file is missing. | Reuses cached captions when available. Existing caption files are kept either way. |
 | **Add upload year to .tag files** | Adds `year YYYY` when a post date is available. | Omits the year tag. |
 | **Include copyright and series tags in .tag files** | Includes them in `.tag` and `.combined`. | Omits them there; source TXT and CSV retain them. |
 
@@ -262,8 +262,9 @@ Fix any reported issue and start the pipeline again to process remaining
 images in `images/`. Existing results and caches are reused where possible.
 
 To regenerate captions for a completed image, copy the image and its source
-`.txt` tags back into `images/` and enable **Regenerate cached captions**.
-The new output replaces matching files in `done/`.
+`.txt` tags back into `images/`, remove the caption files you want to regenerate,
+and enable **Regenerate cached captions**. Existing caption files are never
+overwritten by this option.
 
 After an interrupted save, `.finalize-*` folders in `done/` hold the recovery
 information needed by the next run. Removing them prevents automatic recovery.
@@ -348,7 +349,8 @@ data/env/bin/python data/pipeline_runner.py --skip-wd14
 existing text files. Images still without text files after Danbooru are tagged
 either way. Omit it to also update existing tag files. Use
 `--overwrite-danbooru-txt` to refresh
-source tags or `--overwrite-caption-cache` to regenerate captions.
+source tags or `--overwrite-caption-cache` to bypass cached captions when
+caption files are missing.
 
 Tag lookup searches Danbooru first, then Gelbooru when no matching post is found.
 Both use the MD5 in the image filename. Gelbooru results retain tag categories,

@@ -536,6 +536,7 @@ def build_caption_prompts(
         "Write connected natural prose. Integrate relevant tags into sentences "
         "instead of listing keywords. Keep each attribute attached to the "
         "correct subject and describe spatial and physical relationships clearly. ",
+        "Add 'young' only when age is clearly supported. ",
         "State scene facts directly. Do not refer to the tags, metadata, "
         "character references, Torii report, instructions, or source priorities "
         "in the caption. Do not begin with 'The image' or 'This image'. ",
