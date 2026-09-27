@@ -16,6 +16,7 @@ def main() -> int:
     )
     parser.add_argument("--overwrite-danbooru-txt", action="store_true")
     parser.add_argument("--overwrite-caption-cache", action="store_true")
+    parser.add_argument("--overwrite-caption-files", action="store_true")
     parser.add_argument("--add-year-tag", action="store_true")
     parser.add_argument("--add-copyright-tags", action="store_true")
     args = parser.parse_args()
@@ -30,6 +31,7 @@ def main() -> int:
                 args.skip_wd14,
                 args.add_year_tag,
                 args.add_copyright_tags,
+                args.overwrite_caption_files,
             ),
             cwd=ROOT,
         )

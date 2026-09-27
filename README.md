@@ -240,7 +240,8 @@ image files.
 | --- | --- | --- |
 | **Add high-confidence WD14 tags to existing tag files** | Appends missing high-confidence tags. | Leaves existing tag files unchanged. Images without tags are tagged either way. |
 | **Replace existing tags with fresh Danbooru or Gelbooru tags** | Replaces matching source tags with tags from the first matching post. | Keeps existing tag files and skips their lookup. |
-| **Regenerate cached captions** | Bypasses the caption cache when a caption file is missing. | Reuses cached captions when available. Existing caption files are kept either way. |
+| **Regenerate cached captions** | Bypasses saved caption cache entries when generating. | Reuses cached captions when available. Existing files are controlled by the option below. |
+| **Overwrite existing .long and .short files** | Replaces both caption files even when they already exist; cache use follows the setting above. | Keeps existing `.long` files and skips images that have both caption files. |
 | **Add upload year to .tag files** | Adds `year YYYY` when a post date is available. | Omits the year tag. |
 | **Include copyright and series tags in .tag files** | Includes them in `.tag` and `.combined`. | Omits them there; source TXT and CSV retain them. |
 
@@ -262,9 +263,9 @@ Fix any reported issue and start the pipeline again to process remaining
 images in `images/`. Existing results and caches are reused where possible.
 
 To regenerate captions for a completed image, copy the image and its source
-`.txt` tags back into `images/`, remove the caption files you want to regenerate,
-and enable **Regenerate cached captions**. Existing caption files are never
-overwritten by this option.
+`.txt` tags back into `images/`. Enable **Overwrite existing .long and .short
+files** to replace present caption files. Also enable **Regenerate cached
+captions** if you want fresh model output instead of a matching cached result.
 
 After an interrupted save, `.finalize-*` folders in `done/` hold the recovery
 information needed by the next run. Removing them prevents automatic recovery.
@@ -321,7 +322,9 @@ without moving files.
 
 ### Copy or move images by tags
 
-The helper keeps images and matching `.txt` files together.
+The helper searches the selected file extension for tags (default `.txt`) and
+keeps matching images and sidecar files together. Enter another extension, such
+as `.tag` or `.combined`, to search those files instead.
 Click **Open copy/move images GUI** in the main caption GUI.
 
 ### Export captions as a ZIP
@@ -350,7 +353,8 @@ existing text files. Images still without text files after Danbooru are tagged
 either way. Omit it to also update existing tag files. Use
 `--overwrite-danbooru-txt` to refresh
 source tags or `--overwrite-caption-cache` to bypass cached captions when
-caption files are missing.
+generating. Use `--overwrite-caption-files` to replace existing
+`.long` and `.short` files.
 
 Tag lookup searches Danbooru first, then Gelbooru when no matching post is found.
 Both use the MD5 in the image filename. Gelbooru results retain tag categories,

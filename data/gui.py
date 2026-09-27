@@ -89,7 +89,12 @@ class PipelineGUI:
         self.overwrite_caption_cache = tk.BooleanVar()
         self.add_advanced_option(
             "Regenerate cached captions", self.overwrite_caption_cache,
-            "On: generate short and long captions again. Off: reuse cached captions when available.",
+            "On: bypass the caption cache when generating. Off: reuse it. Existing files are controlled below.",
+        )
+        self.overwrite_caption_files = tk.BooleanVar(value=False)
+        self.add_advanced_option(
+            "Overwrite existing .long and .short files", self.overwrite_caption_files,
+            "On: replace existing .long and .short files. Off: keep them. Cache use is controlled above.",
         )
         self.add_year_tag = tk.BooleanVar(value=False)
         self.add_advanced_option(
@@ -208,6 +213,7 @@ class PipelineGUI:
                 not self.add_wd14_tags.get(),
                 self.add_year_tag.get(),
                 self.add_copyright_tags.get(),
+                self.overwrite_caption_files.get(),
             ),
             daemon=True,
         ).start()
@@ -220,6 +226,7 @@ class PipelineGUI:
         skip_wd14_high_confidence=False,
         add_year_tag=False,
         add_copyright_tags=False,
+        overwrite_caption_files=False,
     ):
         code = 0
         try:
@@ -233,7 +240,8 @@ class PipelineGUI:
                 self.process = subprocess.Popen(
                     stage_command(stage, sys.executable, overwrite_danbooru_txt,
                                   overwrite_caption_cache, skip_wd14_high_confidence,
-                                  add_year_tag, add_copyright_tags), cwd=ROOT,
+                                  add_year_tag, add_copyright_tags,
+                                  overwrite_caption_files), cwd=ROOT,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                     encoding="utf-8", errors="replace", **options,
                 )

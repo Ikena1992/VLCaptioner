@@ -164,7 +164,7 @@ def write_result(image_path, short_text, long_text, artist_names=None, preserve_
         image_path.with_suffix(".long").write_text(long_text + "\n", encoding="utf-8")
 
 
-def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=False):
+def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=False, overwrite_caption_files=False):
     explanations = prompt_builder.load_character_explanations(prompt_builder.CHARACTER_DB)
     fallback = prompt_builder.load_wiki_explanations(prompt_builder.WIKI_CACHE_DB)
     prompts = {}
@@ -185,7 +185,8 @@ def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=Fa
             continue
         short_path, long_path = image.with_suffix(".short"), image.with_suffix(".long")
         complete = (
-            all(path.exists() and path.read_text(encoding="utf-8-sig").strip() for path in (short_path, long_path))
+            not overwrite_caption_files
+            and all(path.exists() and path.read_text(encoding="utf-8-sig").strip() for path in (short_path, long_path))
         )
         torii_path = image.with_suffix(".toriiOutput")
         uses_parquet = image.stem.lower() in parquet_captions
@@ -289,12 +290,17 @@ def process_image(
     parquet_captions,
     overwrite_caption_cache=False,
     context_size=DEFAULT_CAPTION_CONTEXT_SIZE,
+    overwrite_caption_files=False,
 ):
     long_path = image_path.with_suffix(".long")
-    long_text = long_path.read_text(encoding="utf-8-sig").strip() if long_path.exists() else ""
+    long_text = (
+        long_path.read_text(encoding="utf-8-sig").strip()
+        if long_path.exists() and not overwrite_caption_files else ""
+    )
     reuse_existing_long = bool(long_text)
-    if not long_text:
+    if not long_text and not overwrite_caption_files:
         image_path.with_suffix(".short").unlink(missing_ok=True)
+    if not long_text:
         long_text = parquet_captions.get(image_path.stem.lower(), "")
     if not long_text:
         long_text = generate_caption(
@@ -307,7 +313,7 @@ def process_image(
             context_size=context_size,
         )
     long_text = normalize_caption_output(long_text)
-    if not reuse_existing_long:
+    if not reuse_existing_long and not overwrite_caption_files:
         long_path.write_text(long_text + "\n", encoding="utf-8")
     short_text = generate_caption(
         client,
@@ -364,7 +370,12 @@ def main(argv=None):
     parser.add_argument(
         "--overwrite-caption-cache",
         action="store_true",
-        help="Bypass cached captions when a caption file is missing; keep existing caption files.",
+        help="Bypass saved caption cache entries when generating; existing files are controlled separately.",
+    )
+    parser.add_argument(
+        "--overwrite-caption-files",
+        action="store_true",
+        help="Replace existing .long and .short files; caption cache use is controlled separately.",
     )
     parser.add_argument("--add-year-tag", action="store_true", help="Add post upload year to .tag files.")
     parser.add_argument("--add-copyright-tags", action="store_true", help="Add copyright/series tags to .tag files.")
@@ -395,7 +406,8 @@ def main(argv=None):
     }
     parquet = load_parquet_captions(SCRIPT_DIR / "parquet", local_stems)
     prompts, skipped, parquet_cache_prompts = discover_images(
-        load_prompt_builder(), parquet, args.overwrite_caption_cache
+        load_prompt_builder(), parquet, args.overwrite_caption_cache,
+        args.overwrite_caption_files,
     )
     cached_parquet = cache_parquet_long_captions(
         parquet,
@@ -432,6 +444,7 @@ def main(argv=None):
                 parquet,
                 args.overwrite_caption_cache,
                 context_size,
+                args.overwrite_caption_files,
             )
             finish_image(image_path)
         except RuntimeError as error:

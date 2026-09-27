@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import threading
 import tkinter as tk
@@ -6,7 +7,17 @@ from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".avif")
-SIDECAR_EXTENSIONS = (".combined", ".long", ".short", ".tag")
+SIDECAR_EXTENSIONS = (".txt", ".combined", ".long", ".short", ".tag")
+
+
+def normalize_target_extension(value):
+    extension = value.strip().lower()
+    if extension and not extension.startswith("."):
+        extension = "." + extension
+    if not re.fullmatch(r"\.[a-z0-9]+", extension):
+        raise ValueError("Enter one file extension, such as .txt or .tag.")
+    return extension
+
 
 # --- PATH SETUP ---
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -71,6 +82,11 @@ def transfer_files(mode="copy"):
     user_input = search_entry.get()
     contains_input = contains_entry.get().lower().strip()
     exclude_input = exclude_entry.get()
+    try:
+        target_extension = normalize_target_extension(extension_entry.get())
+    except ValueError as error:
+        messagebox.showerror("Invalid file extension", str(error))
+        return
 
     if not source or not dest:
         messagebox.showerror("Error", "Fill source and destination.")
@@ -81,25 +97,25 @@ def transfer_files(mode="copy"):
     keywords = [k.strip().lower() for k in user_input.split(",") if k.strip()]
     exclude_keywords = [k.strip().lower() for k in exclude_input.split(",") if k.strip()]
 
-    txt_files = [f for f in os.listdir(source) if f.lower().endswith(".txt")]
+    target_files = [f for f in os.listdir(source) if f.lower().endswith(target_extension)]
 
-    progress["maximum"] = len(txt_files)
+    progress["maximum"] = len(target_files)
     progress["value"] = 0
-    status_label.config(text=f"0 / {len(txt_files)}")
+    status_label.config(text=f"0 / {len(target_files)}")
 
     copied = 0
 
-    for i, file in enumerate(txt_files):
+    for i, file in enumerate(target_files):
 
         if stop_requested:
             status_label.config(text="Cancelled")
             break
 
-        txt_path = os.path.join(source, file)
+        target_path = os.path.join(source, file)
         base = os.path.splitext(file)[0]
 
         try:
-            with open(txt_path, "r", encoding="utf-8", errors="ignore") as f:
+            with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read().lower()
         except:
             continue
@@ -127,12 +143,12 @@ def transfer_files(mode="copy"):
         match = (tag_match or contains_match) and not exclude_match
 
         if match:
-            if safe_transfer(txt_path, os.path.join(dest, file), mode):
+            if safe_transfer(target_path, os.path.join(dest, file), mode):
                 copied += 1
 
             nl_file = base + ".naturalLanguage"
             nl_path = os.path.join(source, nl_file)
-            if os.path.exists(nl_path):
+            if nl_file != file and os.path.exists(nl_path):
                 if safe_transfer(nl_path, os.path.join(dest, nl_file), mode):
                     copied += 1
 
@@ -146,12 +162,12 @@ def transfer_files(mode="copy"):
             for ext in SIDECAR_EXTENSIONS:
                 sidecar = base + ext
                 sidecar_path = os.path.join(source, sidecar)
-                if os.path.exists(sidecar_path):
+                if sidecar != file and os.path.exists(sidecar_path):
                     if safe_transfer(sidecar_path, os.path.join(dest, sidecar), mode):
                         copied += 1
 
         progress["value"] = i + 1
-        status_label.config(text=f"{i+1} / {len(txt_files)}")
+        status_label.config(text=f"{i+1} / {len(target_files)}")
         root.update_idletasks()
 
     else:
@@ -235,7 +251,7 @@ def stop_gif():
 # --- GUI ---
 root = tk.Tk()
 root.title("Momiji is a virus! she mines crypto!")
-root.geometry("500x600")
+root.geometry("500x650")
 
 tk.Label(root, text="Image Folder").pack()
 source_entry = tk.Entry(root, width=50)
@@ -246,6 +262,11 @@ tk.Label(root, text="Destination Folder").pack()
 dest_entry = tk.Entry(root, width=50)
 dest_entry.pack()
 tk.Button(root, text="Browse", command=select_destination).pack(pady=5)
+
+tk.Label(root, text="Search File Extension").pack()
+extension_entry = tk.Entry(root, width=20)
+extension_entry.insert(0, ".txt")
+extension_entry.pack(pady=5)
 
 tk.Label(root, text="Search Tags").pack()
 tk.Label(root, text="Example: 1girl, blonde hair").pack()
