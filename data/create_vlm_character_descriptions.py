@@ -27,7 +27,7 @@ KEYWORDS = {"nude", "nipples", "pussy", "penis", "anus", "sex", ",cum", "lying",
             "multiple views", "bikini", "swimsuit", "undressing", "masturbation",
             "from below", "upside-down", "facial", "one breast out", "lingerie",
             "close-up", "from behind", "spread legs", "2boys", "2girls", "3boys",
-            "3girls", "multiple girls", "multiple boys", "comic"}
+            "3girls", "multiple girls", "multiple boys", "comic", "alternate costume"}
 INVALID_OUTPUT_TERMS = {
     "maybe", "possibly", "appears to", "standing", "sitting", "lying", "background",
     "in a room", "outdoors", "looking at the viewer", "smiling", "frowning",
