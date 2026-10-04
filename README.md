@@ -367,7 +367,9 @@ labels such as `good quality`.
 Quality thresholds depend on the post rating. For general and sensitive posts,
 scores above 130 receive `masterpiece`; for questionable and explicit posts,
 scores above 230 receive it. The remaining quality ranges are scaled in the
-same proportion. Unknown ratings use the questionable/explicit thresholds.
+same proportion. `best quality` starts at 71 for general/sensitive posts and
+125 for questionable/explicit posts; `good quality` starts at 36 and 63,
+respectively. Unknown ratings use the questionable/explicit thresholds.
 Existing TXT files are still skipped unless `--overwrite-danbooru-txt` is used.
 The standalone refresh script also uses this fallback.
 If Gelbooru requires authentication, add `GELBOORU_USER_ID` and `GELBOORU_API_KEY`

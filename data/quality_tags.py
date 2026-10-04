@@ -10,7 +10,7 @@ def get_quality_tag(score, rating=None):
     safe_or_sensitive = str(rating).strip().lower() in {
         "g", "general", "safe", "s", "sensitive",
     }
-    thresholds = (130, 87, 58, 3) if safe_or_sensitive else (230, 153, 102, 6)
+    thresholds = (130, 70, 35, 3) if safe_or_sensitive else (230, 124, 62, 6)
     for threshold, label in zip(thresholds + (-1,), (
         "masterpiece", "best quality", "good quality", "normal quality", "low quality",
     )):
