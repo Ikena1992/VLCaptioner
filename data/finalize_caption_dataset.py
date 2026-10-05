@@ -179,7 +179,7 @@ def process_caption_pair(short_path: Path, report_success: bool = True) -> bool:
             sources.append(txt_path)
         generated = {
             short_path.name: short_text,
-            f"{stem}.combined": f"{tag_text} {short_text}",
+            f"{stem}.combined": f"{tag_text}. {short_text}",
         }
         if long_text is not None:
             generated[long_path.name] = long_text

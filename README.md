@@ -280,7 +280,7 @@ Each completed image has these companion files in `done/`:
 | `NAME.short` | Compact natural-language caption. |
 | `NAME.long` | Detailed natural-language caption. |
 | `NAME.tag` | Cleaned and ordered Danbooru-style tags. |
-| `NAME.combined` | Tag caption followed by the short caption. |
+| `NAME.combined` | Tag caption followed by a dot and the short caption. |
 | `NAME.txt` | Comma-separated source tags, including fetched meta tags. |
 
 The `.tag` generator intentionally drops most booru meta tags. It includes
@@ -302,7 +302,7 @@ depends on the image and models:
 done/sample.short     A blue-haired character stands outdoors.
 done/sample.long      A character with blue hair stands in an outdoor scene...
 done/sample.tag       1girl, blue hair, outdoors
-done/sample.combined  1girl, blue hair, outdoors A blue-haired character stands outdoors.
+done/sample.combined  1girl, blue hair, outdoors. A blue-haired character stands outdoors.
 done/sample.txt       1girl, blue_hair, outdoors
 done/sample.webp      The processed image
 ```
