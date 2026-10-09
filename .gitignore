@@ -17,3 +17,6 @@ __pycache__/
 *.pyc
 /tests/*
 !/tests/test_finalization_routing.py
+!/tests/test_model_access.py
+!/tests/test_tagger_fallback.py
+!/tests/test_image_conversion.py

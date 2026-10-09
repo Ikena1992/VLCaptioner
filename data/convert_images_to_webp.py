@@ -1,5 +1,6 @@
 import os
-from PIL import Image, UnidentifiedImageError
+import tempfile
+from PIL import Image, ImageOps, UnidentifiedImageError
 from tqdm import tqdm
 
 # Folder named 'images' one level above this script
@@ -32,10 +33,14 @@ def verify_webp(output_path):
 # Get a list of all image files
 image_files = [
     f for f in os.listdir(folder_path)
-    if f.lower().endswith(image_extensions)
+    if f.lower().endswith(image_extensions) and os.path.isfile(os.path.join(folder_path, f))
 ]
 
 failed_files = []
+target_counts = {}
+for filename in image_files:
+    target = (os.path.splitext(filename)[0] + ".webp").casefold()
+    target_counts[target] = target_counts.get(target, 0) + 1
 
 # Process images with a progress bar
 for filename in tqdm(image_files, desc="Converting images", unit="image"):
@@ -44,10 +49,15 @@ for filename in tqdm(image_files, desc="Converting images", unit="image"):
     source_size = os.path.getsize(file_path)
     new_filename = os.path.splitext(filename)[0] + ".webp"
     new_file_path = os.path.join(folder_path, new_filename)
-    temp_file_path = new_file_path + ".tmp"
+    temp_file_path = None
 
     try:
+        if target_counts[new_filename.casefold()] > 1:
+            raise FileExistsError(f"Multiple source images would write {new_filename}; rename them first")
+        if os.path.exists(new_file_path):
+            raise FileExistsError(f"Output already exists: {new_file_path}; originals were preserved")
         with Image.open(file_path) as img:
+            img = ImageOps.exif_transpose(img)
             img.thumbnail((3000, 3000), Image.Resampling.LANCZOS)
 
             # Convert transparency to white background
@@ -64,6 +74,10 @@ for filename in tqdm(image_files, desc="Converting images", unit="image"):
                 img = img.convert("RGB")
 
             # Save image as WebP
+            with tempfile.NamedTemporaryFile(
+                dir=folder_path, prefix=f".{new_filename}.", suffix=".tmp", delete=False
+            ) as temporary:
+                temp_file_path = temporary.name
             save_webp(img, temp_file_path, source_extension, source_size)
 
         # Publish atomically. Reopen the file at its final path before removing
@@ -75,7 +89,7 @@ for filename in tqdm(image_files, desc="Converting images", unit="image"):
     except (UnidentifiedImageError, OSError, ValueError) as error:
         # A failed save may leave an incomplete WebP. Preserve the source and
         # remove only that incomplete output before continuing the batch.
-        if os.path.exists(temp_file_path):
+        if temp_file_path is not None and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
         failed_files.append((file_path, str(error)))
         tqdm.write(f"Skipped {file_path}: {error}")
@@ -86,3 +100,5 @@ if failed_files:
     for file_path, error in failed_files:
         print(f"  {file_path}: {error}")
 print("Done!\n")
+if failed_files:
+    raise SystemExit(1)

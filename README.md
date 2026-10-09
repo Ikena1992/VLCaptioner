@@ -24,7 +24,8 @@ can also run on CPU. The Ollama host must have enough memory for both selected
 vision models and the configured context size.
 
 If an image has no `.txt` tags after the Danbooru lookup, the pipeline runs
-AnimeTimm/WD14 locally and requires access to its Hugging Face model.
+AnimeTimm/WD14 locally, using cached files or downloading its Hugging Face model.
+If AnimeTimm access is denied, it downloads and uses SmilingWolf EVA02 Large v3.
 
 Run the commands below from the VLCaptioner folder unless stated otherwise.
 
@@ -228,8 +229,10 @@ filename's hash, which is used for the Danbooru lookup.
 Existing `.txt` tag files are kept and their Danbooru lookup is skipped unless
 **Replace existing tags with fresh Danbooru or Gelbooru tags** is enabled. If an
 image has no matching Danbooru post or uses another filename, its tags can come
-from a matching `.txt` file or from AnimeTimm. Images still without a `.txt`
-file at the tagging stage require AnimeTimm model access.
+from a matching `.txt` file or from the local tagger. Images still without a
+`.txt` file are tagged with AnimeTimm, or SmilingWolf if AnimeTimm access is denied.
+Blank or metadata-only `.txt` files also receive full tagging, preserving their
+metadata, even when adding high-confidence tags to existing files is disabled.
 
 This step fetches tags for images already in `images/`. It does not download
 image files.
@@ -416,6 +419,15 @@ adjusting the setting.
 ### Local tagging fails
 
 Check Hugging Face access for AnimeTimm and the local PyTorch/GPU installation.
+AnimeTimm is preferred when its files are cached or accessible. If Hugging Face
+denies access, VLCaptioner automatically downloads and uses
+`SmilingWolf/wd-eva02-large-tagger-v3` instead. The log identifies the active
+model. The fallback uses ONNX Runtime with general/character thresholds of
+0.35/0.85; the existing-TXT pass still uses 0.95 and ratings remain disabled.
+To enable AnimeTimm, accept/request access on its model page, then run
+`hf auth login` on the computer running VLCaptioner with a read token from
+the approved account, or set `HF_TOKEN`. The token must allow access to the
+gated model. Network failures are reported separately from access denials.
 The Ollama server's GPU does not run this tagger. If you already have suitable
 tags, leave **Add high-confidence WD14 tags to existing tag files** off.
 
