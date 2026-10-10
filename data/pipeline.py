@@ -49,7 +49,7 @@ def stage_description(stage, overwrite_danbooru_txt=False, skip_wd14_high_confid
     return {
         "convert_images_to_webp.py": "Convert supported originals; preserve existing WebP files",
         "fetch_character_explanations.py": "Fetch missing character references",
-        "create_metadata_csvs.py": "Merge new source tags into metadata; preserve existing fields",
+        "create_metadata_csvs.py": "Create missing CSV files from TXT tags; keep existing CSVs",
         "create_vlm_character_descriptions.py": "Generate missing character descriptions",
         "generate_torii_captions.py": "Reuse Torii reports; generate missing reports",
         "normalize_torii_captions.py": "Prepare Torii reports for refinement",

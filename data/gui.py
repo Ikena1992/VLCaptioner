@@ -9,6 +9,7 @@ import threading
 import tkinter as tk
 import json
 import re
+from pathlib import Path
 from urllib.request import urlopen
 from tkinter import messagebox, scrolledtext
 import ttkbootstrap as ttk
@@ -249,6 +250,7 @@ class PipelineGUI:
             subprocess.Popen(
                 [sys.executable, str(ROOT / "data" / "copy_move_images_GUI.py")],
                 cwd=ROOT,
+                **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
             )
         except OSError as error:
             messagebox.showerror("VLCaptioner", f"Could not open copy/move images GUI: {error}")
@@ -324,9 +326,13 @@ class PipelineGUI:
                 self.events.put(("step_status", stage.script, "Running", stage_description(stage, **run_options)))
                 self.events.put(("stage", index, len(stages), stage.label))
                 self.events.put(f"\n=== {stage.label} ===\n")
-                options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True})
+                options = ({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True})
+                # pythonw lacks console streams; use python for captured worker logs.
+                worker_python = sys.executable
+                if os.name == "nt" and Path(worker_python).name.lower() == "pythonw.exe":
+                    worker_python = str(Path(worker_python).with_name("python.exe"))
                 self.process = subprocess.Popen(
-                    stage_command(stage, sys.executable, overwrite_danbooru_txt,
+                    stage_command(stage, worker_python, overwrite_danbooru_txt,
                                   overwrite_caption_cache, skip_wd14_high_confidence,
                                   add_year_tag, add_copyright_tags,
                                   overwrite_caption_files), cwd=ROOT,
@@ -433,7 +439,7 @@ class PipelineGUI:
         if not process or process.poll() is not None:
             return
         if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
         else:
             os.killpg(process.pid, signal.SIGTERM)
 

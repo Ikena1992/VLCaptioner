@@ -263,8 +263,9 @@ The **Steps** tab shows how the selected options affect each step. During a
 run it reports Pending, Running, Done, Skipped, Failed, or Stopped. Work is
 checked immediately before each step, so tags fetched earlier in the run can
 make local tagging unnecessary. Steps after a failure are marked Not run.
-When local tagging adds tags, the metadata step merges those additions into
-existing CSVs without discarding post metadata or edited fields. Unresolved
+The metadata step creates a CSV from TXT tags only when no CSV exists.
+Existing CSVs are skipped, even if the TXT tags have changed. Post metadata
+is restored from the TXT metadata record when creating a new CSV. Unresolved
 tag categories skip the affected image for the current run so incomplete
 metadata can be fixed and retried. Per-image conversion, tagging, metadata,
 captioning, and finalization failures are logged; remaining images continue.

@@ -193,7 +193,7 @@ def is_quality_tag(tag):
     )
 
 
-def tags_to_csv_row(md5_name, tags):
+def tags_to_csv_row(md5_name, tags, metadata=None):
     """
     Convert tags from one TXT file into the same CSV shape as
     refresh_tags_from_danbooru.py.
@@ -209,8 +209,21 @@ def tags_to_csv_row(md5_name, tags):
     quality = []
     safety_tags = []
     period_tags = []
+    known_categories = {}
+    if metadata:
+        for column, category in (("general", 0), ("artists", 1), ("copyright", 3),
+                                 ("characters", 4), ("meta", 5)):
+            value = metadata.get(column, "")
+            if isinstance(value, str):
+                for tag in split_txt_tags(value):
+                    known_categories[normalize_for_danbooru(tag)] = category
+    seen = set()
 
     for tag in tags:
+        key = normalize_for_danbooru(tag)
+        if key in seen:
+            continue
+        seen.add(key)
         normalized_tag = tag.strip().lower()
 
         if is_quality_tag(tag):
@@ -225,7 +238,9 @@ def tags_to_csv_row(md5_name, tags):
             period_tags.append(tag)
             continue
 
-        category = get_tag_category(tag)
+        category = known_categories.get(key)
+        if category is None:
+            category = get_tag_category(tag)
         if category is None:
             raise RuntimeError(f"Danbooru category lookup unresolved for {tag!r}")
 
@@ -264,29 +279,8 @@ TAG_COLUMNS = ("characters", "copyright", "artists", "general", "meta",
                "safety tags", "quality tag", "period")
 
 
-def merge_source_tags(md5_name, tags, row):
-    """Classify only new tags; keep existing post metadata and edited fields."""
-    existing = {normalize_for_danbooru(tag) for key in TAG_COLUMNS
-                for tag in split_txt_tags(row.get(key, ""))}
-    additions = []
-    for tag in tags:
-        normalized = normalize_for_danbooru(tag)
-        if normalized not in existing:
-            additions.append(tag)
-            existing.add(normalized)
-    if not additions:
-        return row, False
-    added = tags_to_csv_row(md5_name, additions)
-    result = dict(row)
-    for key in TAG_COLUMNS:
-        if added[key]:
-            result[key] = ", ".join(filter(None, [result.get(key, ""), added[key]]))
-    result["md5"] = md5_name
-    return result, True
-
-
 def write_csv(csv_file_path, row):
-    """Publish complete metadata without truncating the previous CSV."""
+    """Publish complete metadata only if no destination already exists."""
     destination = Path(csv_file_path)
     temporary = None
     try:
@@ -299,7 +293,15 @@ def write_csv(csv_file_path, row):
             writer.writerow(row)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, destination)
+        try:
+            if os.name == "nt":
+                # Windows rename is atomic and refuses an existing destination.
+                os.rename(temporary, destination)
+            else:
+                os.link(temporary, destination)
+        except FileExistsError:
+            return False
+        return True
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
@@ -308,41 +310,40 @@ def write_csv(csv_file_path, row):
 def main():
     txt_files = [p for p in Path(INPUT_FOLDER).iterdir() if p.is_file() and p.suffix.lower() == ".txt"]
     unresolved_files = 0
+    created_files = skipped_files = 0
     for path in tqdm(txt_files, desc="Preparing metadata"):
         if is_skipped(path):
             continue
         csv_path = path.with_suffix(".csv")
         try:
+            if csv_path.is_file():
+                skipped_files += 1
+                continue
+            if csv_path.exists():
+                raise IsADirectoryError(f"CSV output path is not a file: {csv_path}")
             content = path.read_text(encoding="utf-8-sig")
             tags = split_txt_tags(content)
             if not tags:
                 raise ValueError("Source tag file has no tags")
-            if csv_path.exists():
-                with csv_path.open(newline="", encoding="utf-8-sig") as handle:
-                    row = next(csv.DictReader(handle), None)
-                if row is None or None in row or any(value is None for value in row.values()) or not set(TAG_COLUMNS).issubset(row):
-                    raise ValueError("Existing CSV has missing metadata columns or no row")
+            # Create missing CSVs from the visible TXT tags.
+            metadata = read_source_metadata(content)
+            row = tags_to_csv_row(path.stem, tags, metadata)
+            if metadata is not None:
                 for key in CSV_FIELDNAMES:
-                    row.setdefault(key, "")
-                row, changed = merge_source_tags(path.stem, tags, row)
-                if not changed:
-                    continue
+                    if key not in TAG_COLUMNS and key != "md5":
+                        value = metadata.get(key, "")
+                        row[key] = "" if value is None else str(value)
+            if write_csv(csv_path, row):
+                created_files += 1
             else:
-                metadata = read_source_metadata(content)
-                if metadata is not None:
-                    row = {key: str(metadata.get(key, "")) for key in CSV_FIELDNAMES}
-                    row["md5"] = path.stem
-                    row, _ = merge_source_tags(path.stem, tags, row)
-                else:
-                    row = tags_to_csv_row(path.stem, tags)
-            write_csv(csv_path, row)
-        except (RuntimeError, ValueError, OSError, csv.Error) as error:
+                skipped_files += 1
+        except Exception as error:
             unresolved_files += 1
             skip_image(path, error)
             tqdm.write(f"Could not prepare {path.name}: {error}. Existing files were preserved; retry after fixing the issue.")
     if unresolved_files:
         print(f"Metadata unavailable for {unresolved_files} image(s); remaining images will continue.")
-    print("Metadata is ready; new source tags have been merged into existing CSVs.")
+    print(f"Metadata step finished: {created_files} CSV(s) created, {skipped_files} existing CSV(s) skipped, {unresolved_files} image(s) failed.")
     return 0
 
 
