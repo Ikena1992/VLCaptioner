@@ -423,7 +423,7 @@ AnimeTimm is preferred when its files are cached or accessible. If Hugging Face
 denies access, VLCaptioner automatically downloads and uses
 `SmilingWolf/wd-eva02-large-tagger-v3` instead. The log identifies the active
 model. The fallback uses ONNX Runtime with general/character thresholds of
-0.35/0.85; the existing-TXT pass still uses 0.95 and ratings remain disabled.
+0.35/0.85; the existing-TXT pass uses 0.91 and ratings remain disabled.
 To enable AnimeTimm, accept/request access on its model page, then run
 `hf auth login` on the computer running VLCaptioner with a read token from
 the approved account, or set `HF_TOKEN`. The token must allow access to the
