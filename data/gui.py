@@ -88,7 +88,7 @@ class PipelineGUI:
         self.advanced.pack(fill="both", expand=True)
         self.notebook.add(run_page, text="Caption images")
         self.notebook.add(options_page, text="Options")
-        steps_page = ttk.Frame(self.notebook, padding=12)
+        steps_page = self.steps_page = ttk.Frame(self.notebook, padding=12)
         self.notebook.add(steps_page, text="Steps")
         self.steps = ttk.Treeview(steps_page, columns=("status", "detail"), height=9)
         self.steps.heading("#0", text="Step")
@@ -289,7 +289,7 @@ class PipelineGUI:
         self.run_options = self.selected_options()
         for stage in STAGES:
             self.steps.set(stage.script, "status", "Pending")
-        self.notebook.select(0)
+        self.notebook.select(self.steps_page)
         for widget in self.option_widgets:
             widget.configure(state="disabled")
         self.progress_bar.configure(value=0)
