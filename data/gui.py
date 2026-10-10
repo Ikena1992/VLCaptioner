@@ -71,6 +71,7 @@ class PipelineGUI:
         self.manual_download_handle = None
         self.active_batch = None
         self.queue_paused = False
+        self.cleanup_errors = {}
         self.run_images = ROOT / "images"
         self.process = None
         self.events = queue.Queue()
@@ -136,7 +137,7 @@ class PipelineGUI:
         ttk.Button(queue_controls, text="Cancel selected", command=lambda: self.change_batch("Cancelled")).pack(side="left")
         ttk.Label(queue_page, text="Pause queue lets the current batch finish. Use Stop below to stop it sooner. "
                   "To continue a stopped or failed batch, select it, click Retry selected, then Resume queue. "
-                  "Cancel selected removes a waiting batch from processing and keeps its files.",
+                  "Cancel selected returns the batch’s images and tag files to images/ and removes it from the queue.",
                   wraplength=850, justify="left").pack(anchor="w", pady=6)
         setup = ttk.Labelframe(run_page, text="1. Check setup", padding=12)
         setup.pack(fill="x", pady=(0, 12))
@@ -244,6 +245,11 @@ class PipelineGUI:
         try:
             caption_queue.recover_downloads()
             jobs = caption_queue.jobs()
+            known_ids = {job["id"] for job in jobs}
+            for identifier in self.queue_tree.get_children():
+                if identifier not in known_ids:
+                    self.queue_tree.delete(identifier)
+                    self.cleanup_errors.pop(identifier, None)
             if not self.running and any(job["status"] == "Running" for job in jobs):
                 handle = caption_queue.worker_lock()
                 if handle:
@@ -256,13 +262,34 @@ class PipelineGUI:
                         handle.close()
             for job in jobs:
                 identifier = job["id"]
-                values = (job["count"], job["status"])
+                if caption_queue.remove_missing(identifier):
+                    if self.queue_tree.exists(identifier):
+                        self.queue_tree.delete(identifier)
+                    continue
+                display_status = job["status"]
+                if job["status"] in ("Completed", "Cancelled"):
+                    try:
+                        cleaned = caption_queue.cleanup_batch(identifier, job["status"])
+                        display_status += " — waiting for cleanup"
+                    except (OSError, caption_queue.sqlite3.Error) as error:
+                        cleaned = False
+                        display_status += " — cleanup blocked"
+                        if self.cleanup_errors.get(identifier) != str(error):
+                            self.append(f"Batch {identifier[:6]} cleanup blocked: {error}\n")
+                            self.cleanup_errors[identifier] = str(error)
+                    if cleaned:
+                        self.cleanup_errors.pop(identifier, None)
+                        if self.queue_tree.exists(identifier):
+                            self.queue_tree.delete(identifier)
+                        continue
+                values = (job["count"], display_status)
                 if self.queue_tree.exists(identifier):
                     self.queue_tree.item(identifier, values=values)
                 else:
                     self.queue_tree.insert("", "end", iid=identifier, text=job["label"] + " " + identifier[:6], values=values)
             if not self.running and not self.checking and self.setup_ready and not self.queue_paused:
-                job = next((job for job in jobs if job["status"] == "Waiting"), None)
+                job = next((job for job in jobs if job["status"] == "Waiting"
+                            and (caption_queue.QUEUE_DIR / job["id"]).exists()), None)
                 if job:
                     self.start(job)
         except (OSError, caption_queue.sqlite3.Error) as error:
@@ -381,7 +408,7 @@ class PipelineGUI:
         except (OSError, ValueError, KeyError, TypeError, RuntimeError, caption_queue.sqlite3.Error) as error:
             if self.active_batch:
                 try:
-                    caption_queue.transition(self.active_batch, ("Running",), "Failed")
+                    caption_queue.transition(self.active_batch, ("Waiting", "Running"), "Failed")
                 except (OSError, caption_queue.sqlite3.Error):
                     pass
             if self.worker_handle:
@@ -392,8 +419,10 @@ class PipelineGUI:
                 self.manual_download_handle = None
             self.running = False
             self.active_batch = None
-            self.queue_paused = True
-            self.queue_pause_button.configure(text="Resume queue")
+            batch_problem = batch is not None and isinstance(error, (ValueError, KeyError, TypeError))
+            if not batch_problem:
+                self.queue_paused = True
+                self.queue_pause_button.configure(text="Resume queue")
             self.progress.set(f"Could not start captioning: {error}")
             for widget in self.option_widgets:
                 widget.configure(state="normal")
@@ -431,7 +460,13 @@ class PipelineGUI:
         self.active_batch = batch["id"] if batch else None
         self.run_images = caption_queue.QUEUE_DIR / self.active_batch if batch else ROOT / "images"
         if batch and not self.run_images.is_dir():
-            raise ValueError("The queued image folder is missing; restore it before retrying.")
+            if caption_queue.remove_missing(self.active_batch):
+                if self.queue_tree.exists(self.active_batch):
+                    self.queue_tree.delete(self.active_batch)
+            self.active_batch = None
+            self.worker_handle.close()
+            self.worker_handle = None
+            return
         self.run_images.mkdir(parents=True, exist_ok=True)
         selected = self.selected_options()
         saved = json.loads(batch["options"]) if batch and batch["options"] else selected
@@ -493,6 +528,7 @@ class PipelineGUI:
         overwrite_caption_files=False,
     ):
         code = 0
+        shared_failure = False
         active_index = None
         run_options = dict(overwrite_danbooru_txt=overwrite_danbooru_txt,
                            overwrite_caption_cache=overwrite_caption_cache,
@@ -531,6 +567,8 @@ class PipelineGUI:
                     self.terminate_process_tree()
                 with self.process.stdout:
                     for line in self.process.stdout:
+                        if "OllamaUnavailableError:" in line:
+                            shared_failure = True
                         self.events.put(line)
                 code = self.process.wait()
                 self.events.put(("step_status", stage.script,
@@ -543,6 +581,7 @@ class PipelineGUI:
                     break
         except Exception as error:
             code = 1
+            shared_failure = True
             process = getattr(self, "process", None)
             if process is not None and process.poll() is None:
                 self.terminate_process_tree()
@@ -550,7 +589,7 @@ class PipelineGUI:
             self.events.put(f"\nPipeline could not start: {error}\n")
             if active_index is not None:
                 self.events.put(("step_status", stages[active_index - 1].script, "Failed", str(error)))
-        self.events.put(("done", code))
+        self.events.put(("done", code, shared_failure))
 
     def read_events(self):
         try:
@@ -583,6 +622,7 @@ class PipelineGUI:
                         self.progress.set(f"Stage {index} of {total}: {label}. Images remaining: {image_count(self.run_images)}; completed: {image_count(ROOT / 'done')}; needing review: {image_count(ROOT / 'captionReview')}.")
                         continue
                     code = event[1]
+                    shared_failure = bool(event[2]) if len(event) > 2 else False
                     self.process = None
                     self.running = False
                     was_batch = bool(self.active_batch)
@@ -595,7 +635,7 @@ class PipelineGUI:
                             self.append(f"Could not save batch status: {error}. The batch can be recovered on reopening.\n")
                             self.queue_paused = True
                         self.active_batch = None
-                        if code or status == "Needs retry":
+                        if code == 130 or shared_failure:
                             self.queue_paused = True
                         if self.queue_paused:
                             self.queue_pause_button.configure(text="Resume queue")
@@ -631,8 +671,10 @@ class PipelineGUI:
                     self.progress.set("Run stopped. Completed work is kept; start again to resume." if code == 130 else ("Run finished. Review the files below." if code == 0 else "Run failed. Check the log below, fix the issue, then start again."))
                     if code == 0 and skipped_count:
                         self.progress.set(f"Finished with {skipped_count} skipped image(s). Their originals are kept for retry; see the activity log.")
-                    if code not in (0, 130):
+                    if code not in (0, 130) and (not was_batch or shared_failure):
                         messagebox.showerror("VLCaptioner", f"Pipeline failed with exit code {code}. See the log below.")
+                    if was_batch and code not in (0, 130) and not shared_failure:
+                        self.progress.set("Batch failed; its files are kept for retry. Continuing with other queued batches.")
                     if was_batch and code == 130:
                         self.progress.set("Batch stopped. Select it in Queue, click Retry selected, then Resume queue.")
                     self.refresh_setup()

@@ -367,8 +367,8 @@ The final smaller batch is queued when downloads finish or stop.
 Settings and detailed progress stay in the captioning GUI. Settings are captured
 when each batch starts and retained for retries. **Pause queue** lets the active
 batch finish; **Stop** stops the active captioning batch. Use **Retry selected**
-and **Resume queue** for stopped or failed batches. Cancelling a waiting batch
-keeps its files. Queued requests survive closing the GUIs; interrupted active
+and **Resume queue** for stopped or failed batches. Cancelling a waiting batch returns its images and companion files to `images/`,
+then removes its folder and queue record. Completed batches are also cleaned up. Queued requests survive closing the GUIs; interrupted active
 batches appear as stopped when the captioning GUI reopens.
 If the downloader exits unexpectedly, its completed images are recovered as a
 stopped batch in Queue. Select that batch and retry it; partial downloads are

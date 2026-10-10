@@ -11,6 +11,10 @@ import requests
 from PIL import Image
 
 
+class OllamaUnavailableError(RuntimeError):
+    """A shared server failure that should stop the current pipeline."""
+
+
 class OllamaClient:
     def __init__(self, url: str, timeout: int):
         self.url = url.rstrip("/")
@@ -61,8 +65,8 @@ class OllamaClient:
                 f"{self.url}/api/tags", timeout=min(self.timeout, 10)
             )
             self._raise_for_status(response)
-        except requests.RequestException as error:
-            raise RuntimeError(
+        except (requests.RequestException, RuntimeError) as error:
+            raise OllamaUnavailableError(
                 f"Could not reach Ollama at {self.url}: {error}"
             ) from error
 
@@ -88,19 +92,19 @@ class OllamaClient:
                         try:
                             update = json.loads(raw_line)
                         except (TypeError, ValueError) as error:
-                            raise RuntimeError(
+                            raise OllamaUnavailableError(
                                 f"Ollama returned invalid JSON while pulling {model}"
                             ) from error
                         if update.get("error"):
-                            raise RuntimeError(
+                            raise OllamaUnavailableError(
                                 f"Ollama could not pull {model}: {update['error']}"
                             )
                         current = update.get("status")
                         if current and current != last_status:
                             status(f"Ollama pull: {current}")
                             last_status = current
-            except requests.RequestException as error:
-                raise RuntimeError(f"Failed to pull Ollama model {model}: {error}") from error
+            except (requests.RequestException, RuntimeError) as error:
+                raise OllamaUnavailableError(f"Failed to pull Ollama model {model}: {error}") from error
         self._verified_models.add(model)
 
     def chat(
@@ -131,6 +135,16 @@ class OllamaClient:
                 timeout=self.timeout,
             )
             self._raise_for_status(response)
+        except requests.Timeout as error:
+            # A slow image is recoverable if the server still answers health requests.
+            try:
+                health = requests.get(f"{self.url}/api/tags", timeout=min(self.timeout, 5))
+                self._raise_for_status(health)
+            except (requests.RequestException, RuntimeError) as health_error:
+                raise OllamaUnavailableError(f"Ollama is unavailable: {health_error}") from health_error
+            raise RuntimeError("This image timed out; Ollama is still available") from error
+        except requests.ConnectionError as error:
+            raise OllamaUnavailableError(f"Ollama is unavailable: {error}") from error
         except requests.RequestException as error:
             raise RuntimeError(f"Ollama request failed: {error}") from error
         payload = response.json()

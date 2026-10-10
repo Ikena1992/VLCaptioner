@@ -3,6 +3,8 @@ import json
 import os
 import sqlite3
 import uuid
+import re
+import filecmp
 from contextlib import contextmanager
 from runtime_config import PROJECT_DIR
 
@@ -102,6 +104,15 @@ def recover_downloads():
     for job in jobs():
         if job["status"] != "Downloading":
             continue
+        if not (QUEUE_DIR / job["id"]).exists():
+            owner = downloader_lock()
+            if owner is not None:
+                try:
+                    transition(job["id"], ("Downloading",), "Stopped")
+                    remove_missing(job["id"])
+                finally:
+                    owner.close()
+            continue
         handle = download_lock(job["id"])
         if handle is None:
             continue
@@ -122,3 +133,83 @@ def transition(identifier, expected, status, count=None, options=None):
         result = db.execute(f"UPDATE jobs SET status=?, count=COALESCE(?,count), options=COALESCE(?,options) WHERE id=? AND status IN ({placeholders})",
                             (status, count, json.dumps(options) if options is not None else None, identifier, *expected))
         return result.rowcount == 1
+
+
+def remove_missing(identifier):
+    """Forget missing folders only when no worker owns the batch."""
+    if not isinstance(identifier, str) or not re.fullmatch(r"[0-9a-f]{32}", identifier):
+        return False
+    folder = QUEUE_DIR / identifier
+    if folder.exists():
+        return False
+    with connect() as db:
+        result = db.execute("DELETE FROM jobs WHERE id=? AND status NOT IN ('Downloading', 'Running')", (identifier,))
+        return result.rowcount == 1
+
+
+def cleanup_completed(identifier):
+    return cleanup_batch(identifier, "Completed")
+
+
+def cleanup_batch(identifier, status="Cancelled"):
+    """Return unused files to images/ and delete the folder and queue record."""
+    if status not in ("Completed", "Cancelled"):
+        return False
+    if not isinstance(identifier, str) or not re.fullmatch(r"[0-9a-f]{32}", identifier):
+        return False
+    folder = QUEUE_DIR / identifier
+    base = QUEUE_DIR.resolve()
+    if folder.is_symlink() or folder.resolve().parent != base:
+        return False
+    worker = worker_lock()
+    if worker is None:
+        return False
+    download = None
+    try:
+        download = downloader_lock()
+        if download is None:
+            return False
+        with connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT status FROM jobs WHERE id=?", (identifier,)).fetchone()
+            if row is None:
+                return not folder.exists()
+            if row["status"] != status:
+                return False
+            if folder.exists():
+                entries = list(folder.iterdir())
+                if any(not entry.is_file() or entry.is_symlink() for entry in entries):
+                    raise OSError("Batch contains a folder or link; its files were preserved.")
+                destination = QUEUE_DIR.parent
+                disposable = {".downloading.lock", "conditional_rules.log"}
+                # Check every conflict before moving any companion file.
+                for entry in entries:
+                    if entry.name in disposable:
+                        continue
+                    target = destination / entry.name
+                    if target.exists() and (target.is_symlink() or not target.is_file()
+                                            or not filecmp.cmp(entry, target, shallow=False)):
+                        raise FileExistsError(f"Cannot return {entry.name}: a different file already exists in images/.")
+                for entry in entries:
+                    if entry.name in disposable:
+                        entry.unlink(missing_ok=True)
+                        continue
+                    target = destination / entry.name
+                    if target.exists():
+                        if target.is_symlink() or not target.is_file() or not filecmp.cmp(entry, target, shallow=False):
+                            raise FileExistsError(f"Cannot return {entry.name}: a different file already exists in images/.")
+                    else:
+                        # Both paths are on the same filesystem. Publish a whole
+                        # file atomically, without overwriting a racing target.
+                        if os.name == "nt":
+                            os.rename(entry, target)
+                            continue
+                        os.link(entry, target)
+                    entry.unlink()
+                folder.rmdir()
+            db.execute("DELETE FROM jobs WHERE id=? AND status=?", (identifier, status))
+        return True
+    finally:
+        if download:
+            download.close()
+        worker.close()

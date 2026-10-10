@@ -30,6 +30,14 @@ def is_skipped(image):
 
 
 def skip_image(image, error):
+    from ollama_client import OllamaUnavailableError
+    cause = error
+    seen = set()
+    while isinstance(cause, BaseException) and id(cause) not in seen:
+        if isinstance(cause, OllamaUnavailableError):
+            raise cause
+        seen.add(id(cause))
+        cause = cause.__cause__ or cause.__context__
     path = os.environ.get(ENV_KEY)
     if path:
         records = failures(path)

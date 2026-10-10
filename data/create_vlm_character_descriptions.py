@@ -6,7 +6,7 @@ import hashlib
 import sqlite3
 from pathlib import Path
 
-from ollama_client import OllamaClient
+from ollama_client import OllamaClient, OllamaUnavailableError
 from cache_seed import ensure_runtime_cache
 from runtime_config import load_positive_int, load_setting
 from tqdm import tqdm
@@ -131,6 +131,8 @@ def main():
                     model, PROMPT, image,
                     {"temperature": 0.0, "num_predict": 256, "num_ctx": 4096},
                 )
+            except OllamaUnavailableError:
+                raise
             except Exception as error:
                 tqdm.write(f"Skipping character reference {image.name}: {error}; trying another candidate")
                 continue
