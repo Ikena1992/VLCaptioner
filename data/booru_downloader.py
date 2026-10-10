@@ -70,9 +70,10 @@ def existing_hashes(*folders):
 
 class ImageIndex(set):
     """Reuse folder scans while still detecting images added during a run."""
-    def __init__(self, images, done):
+    def __init__(self, images, done, done1=None):
         super().__init__()
         self.images, self.done = images, done
+        self.done1 = done1 if done1 is not None else done.parent / "done1"
         self.locations = {}
         self.last_scan = float("-inf")
         self.refresh(force=True)
@@ -80,7 +81,7 @@ class ImageIndex(set):
     def refresh(self, force=False):
         if not force and time.monotonic() - self.last_scan < 5:
             return
-        for folder in (self.images, self.done):
+        for folder in (self.images, self.done, self.done1):
             for md5 in existing_hashes(folder):
                 self.locations[md5] = folder.name + "/"
                 self.add(md5)
@@ -147,8 +148,9 @@ def save_original(post, source, images, done, known, cancel, log=lambda message:
         location = known.locations.get(md5, "images/ or earlier in this queue")
     else:
         # Standalone callers without an index still receive a current folder check.
-        present = md5 in known or md5 in existing_hashes(images, done)
-        location = "done/" if present and md5 in existing_hashes(done) else "images/ or earlier in this queue"
+        done1 = done.parent / "done1"
+        present = md5 in known or md5 in existing_hashes(images, done, done1)
+        location = "done1/" if md5 in existing_hashes(done1) else "done/" if md5 in existing_hashes(done) else "images/ or earlier in this queue"
     if present:
         log(f"Skipped: matching MD5 image already in {location}.")
         known.add(md5)
@@ -191,9 +193,9 @@ def save_original(post, source, images, done, known, cancel, log=lambda message:
             known.refresh(force=True)
             present = md5 in known
         else:
-            present = md5 in existing_hashes(images, done)
+            present = md5 in existing_hashes(images, done, done.parent / "done1")
         if present:
-            log("Skipped: matching image appeared in images/ or done/ during the download.")
+            log("Skipped: matching image appeared in images/, done/, or done1/ during the download.")
             known.add(md5)
             return "skipped"
         stage = "tag files"

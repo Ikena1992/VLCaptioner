@@ -351,6 +351,11 @@ without moving files.
 
 ### Image downloader
 
+Download searches use a compact table suitable for thousands of rows. Select a
+row and edit its source, search tags, and post limit in the fields below the table.
+Changes are saved with the downloader settings. Use Ctrl or Shift to select
+multiple rows, then **Remove selected** (or Delete) to remove them.
+
 Download and Copy / move are owned windows of the captioning GUI. Opening either
 tool again brings its existing window forward. Closing the captioning GUI stops
 active work and waits for its tool windows to close. Launching a tool directly

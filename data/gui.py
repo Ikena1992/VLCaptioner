@@ -150,7 +150,7 @@ class PipelineGUI:
         ttk.Label(downloads, text="Get original images from Danbooru or Gelbooru using tag searches.",
                   wraplength=810, justify="left").pack(anchor="w")
         ttk.Label(downloads, text="Images and matching tag files are saved to images/. "
-                  "Images already in images/ or done/ are skipped.",
+                  "Images already in images/, done/, or done1/ are skipped.",
                   wraplength=810, justify="left").pack(anchor="w", pady=(4, 8))
         ttk.Button(downloads, text="Open image downloader", bootstyle="primary",
                    command=self.open_downloader_gui).pack(anchor="w")
