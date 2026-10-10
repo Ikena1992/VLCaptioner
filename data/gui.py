@@ -10,6 +10,7 @@ import tkinter as tk
 import json
 import re
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from urllib.request import urlopen
 from tkinter import messagebox, scrolledtext
 import ttkbootstrap as ttk
@@ -17,6 +18,7 @@ import ttkbootstrap as ttk
 from pipeline import ROOT, STAGES, stage_command, stage_description, stage_skip_reason
 from runtime_config import CONFIG_FILE, read_settings
 from image_failures import ENV_KEY, reset_failures, failures
+from booru_setup import check_booru_access
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".gif", ".webp"}
 
@@ -47,6 +49,9 @@ def check_setup():
         except Exception as error:
             messages.append(f"• Cannot reach Ollama at {url}: {error}. Start Ollama and check the URL.")
             missing.append("OLLAMA_URL")
+    with ThreadPoolExecutor(max_workers=2) as checks:
+        messages.extend(checks.map(lambda site: check_booru_access(site, settings),
+                                   ("Danbooru", "Gelbooru")))
     return count > 0 and not missing, "\n".join(messages)
 
 
