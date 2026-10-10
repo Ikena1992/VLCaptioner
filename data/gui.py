@@ -70,8 +70,8 @@ class PipelineGUI:
         self.last_outcome = False
         self.current_stage = (0, len(STAGES))
         self.option_widgets = []
-        root.geometry("1040x820")
-        root.minsize(900, 760)
+        root.geometry("1040x880")
+        root.minsize(900, 840)
         frame = ttk.Frame(root, padding=20)
         frame.pack(fill="both", expand=True)
         header = ttk.Frame(frame)
@@ -98,7 +98,22 @@ class PipelineGUI:
         self.steps.column("status", width=85, stretch=False)
         self.steps.column("detail", width=550)
         self.steps.pack(fill="both", expand=True)
-        images = ttk.Labelframe(run_page, text="1. Add images", padding=12)
+        setup = ttk.Labelframe(run_page, text="1. Check setup", padding=12)
+        setup.pack(fill="x", pady=(0, 12))
+        self.setup_message = tk.StringVar(value="Checking images, configuration, and Ollama…")
+        ttk.Label(setup, textvariable=self.setup_message, justify="left", wraplength=810).pack(side="left", fill="x", expand=True)
+        self.check_button = ttk.Button(setup, text="Check again", bootstyle="secondary-outline", command=self.refresh_setup)
+        self.check_button.pack(side="right", anchor="n", padx=(10, 0))
+        downloads = ttk.Labelframe(run_page, text="2. Download images (optional)", padding=12)
+        downloads.pack(fill="x", pady=(0, 12))
+        ttk.Label(downloads, text="Get original images from Danbooru or Gelbooru using tag searches.",
+                  wraplength=810, justify="left").pack(anchor="w")
+        ttk.Label(downloads, text="Images and matching tag files are saved to images/. "
+                  "Images already in images/ or done/ are skipped.",
+                  wraplength=810, justify="left").pack(anchor="w", pady=(4, 8))
+        ttk.Button(downloads, text="Open image downloader", bootstyle="primary",
+                   command=self.open_downloader_gui).pack(anchor="w")
+        images = ttk.Labelframe(run_page, text="3. Add images", padding=12)
         images.pack(fill="x", pady=(0, 12))
         ttk.Label(images, text="Place your images in the images folder. Matching tag files are optional.").pack(anchor="w")
         folders = ttk.Frame(images)
@@ -106,12 +121,6 @@ class PipelineGUI:
         ttk.Button(folders, text="Open images folder", bootstyle="primary-outline", command=lambda: self.open_folder("images")).pack(side="left")
         self.copy_move_button = ttk.Button(folders, text="Copy / move by tags", bootstyle="secondary-outline", command=self.open_copy_move_gui)
         self.copy_move_button.pack(side="left", padx=8)
-        setup = ttk.Labelframe(run_page, text="2. Check setup", padding=12)
-        setup.pack(fill="x", pady=(0, 12))
-        self.setup_message = tk.StringVar(value="Checking images, configuration, and Ollama…")
-        ttk.Label(setup, textvariable=self.setup_message, justify="left", wraplength=810).pack(side="left", fill="x", expand=True)
-        self.check_button = ttk.Button(setup, text="Check again", bootstyle="secondary-outline", command=self.refresh_setup)
-        self.check_button.pack(side="right", anchor="n", padx=(10, 0))
         self.add_wd14_tags = tk.BooleanVar(value=False)
         self.add_advanced_option(
             "Add missing tags to existing tag files", self.add_wd14_tags,
@@ -247,6 +256,16 @@ class PipelineGUI:
         if follow:
             self.log.see("end")
         self.log.configure(state="disabled")
+
+    def open_downloader_gui(self):
+        try:
+            subprocess.Popen(
+                [sys.executable, str(ROOT / "data" / "downloader_gui.py")],
+                cwd=ROOT,
+                **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+            )
+        except OSError as error:
+            messagebox.showerror("VLCaptioner", f"Could not open image downloader: {error}")
 
     def open_copy_move_gui(self):
         if self.running:

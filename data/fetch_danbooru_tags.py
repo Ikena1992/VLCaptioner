@@ -3,6 +3,7 @@ import os
 import csv
 import argparse
 import requests
+import tempfile
 from pathlib import Path
 from refresh_tags_from_danbooru import post_to_tags, get_period_tag, get_rating_tags
 from tqdm import tqdm
@@ -41,13 +42,29 @@ def lookup_danbooru(md5_hash):
 
 def format_tags(tag_string):
     """Format tag string for saving."""
-    tags = tag_string.strip().split()
+    tags = str(tag_string or "").strip().split()
     return ", ".join([t.replace("_", " ") for t in tags])
 
-def save_tags(md5_hash, tags, overwrite_existing_txt=False):
+
+def atomic_write(path, write):
+    """Keep existing files intact if writing fails, using a unique temporary file."""
+    path = Path(path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", newline="", encoding="utf-8",
+                                         dir=path.parent, prefix=".source-tags-", suffix=".tmp", delete=False) as handle:
+            temporary = Path(handle.name)
+            write(handle)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+def save_tags(md5_hash, tags, overwrite_existing_txt=False, image_folder=None):
     """Save CSV and TXT files for an image's tags."""
-    csv_path = os.path.join(IMAGE_FOLDER, f"{md5_hash}.csv")
-    txt_path = os.path.join(IMAGE_FOLDER, f"{md5_hash}.txt")
+    folder = IMAGE_FOLDER if image_folder is None else image_folder
+    csv_path = os.path.join(folder, f"{md5_hash}.csv")
+    txt_path = os.path.join(folder, f"{md5_hash}.txt")
 
     score = tags.get("score", 0)
     quality_tag = get_quality_tag(score, tags.get("rating"))
@@ -75,13 +92,12 @@ def save_tags(md5_hash, tags, overwrite_existing_txt=False):
     row["quality tag"] = get_quality_tag(row.get("score"), row.get("rating")) or normalize_quality_tag(row["quality tag"])
     if overwrite_existing_txt or not has_source_tags(Path(txt_path)):
         all_tags = [row[key] for key in ("characters", "copyright", "artists", "general", "meta", "safety tags", "quality tag") if row[key]]
-        Path(txt_path).write_text(", ".join(all_tags) + "\n", encoding="utf-8")
-    temporary = Path(csv_path + ".tmp")
-    with temporary.open("w", newline="", encoding="utf-8") as handle:
+        atomic_write(txt_path, lambda handle: handle.write(", ".join(all_tags) + "\n"))
+    def write_csv(handle):
         writer = csv.DictWriter(handle, fieldnames=list(row))
         writer.writeheader()
         writer.writerow(row)
-    temporary.replace(csv_path)
+    atomic_write(csv_path, write_csv)
 
 
 # ---------------- MAIN ----------------

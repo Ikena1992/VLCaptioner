@@ -9,13 +9,66 @@ Ollama can run locally or on another computer on your network. Optional
 AnimeTimm/WD14 tagging runs on the computer running VLCaptioner.
 
 For a first run: [install the project](#setup), [copy and edit the
-configuration](#configuration), put one image and a matching tag file in
-`images/`, then [start the GUI](#captioning-images). Check the resulting files
+configuration](#configuration), then [start the GUI](#captioning-images).
+Use the [image downloader](#image-downloader) or put one image and a matching
+tag file in `images/`. Check the resulting files
 in `done/` before processing a larger dataset.
 
 ![VLCaptioner captioning GUI and copy/move images window](docs/images/gui-overview.png)
 
 The captioning GUI (left) and the copy/move tool with tag filters (right).
+
+## Image downloader
+
+Start the captioning GUI with `GUI.cmd` on Windows or `bash GUI.sh` on Linux,
+then select **Open image downloader** in **2. Download images (optional)**.
+The downloader opens in a separate window with no viewer and does not require
+Ollama. No separate downloader launcher is needed. On Windows, `GUI.cmd`
+launches `data/GUI.pyw` using the installed Python environment.
+
+1. Add a row for each search and choose **Danbooru** or **Gelbooru**.
+2. Enter space-separated search tags, such as `blue_eyes long_hair`.
+3. Set a positive **Post limit**. This is the number of posts checked, including
+   blacklisted posts, images already in `images/` or `done/`, unavailable
+   originals, unsupported files, and failed downloads. A limit of 100 can
+   download fewer than 100 images.
+4. Optionally enter a **Tag blacklist**, such as `tall_image watermark comic`.
+   Use spaces, just like search tags. Keep underscores within tags:
+   `tall_image` matches that tag; `tall image` does not. Any matching blacklist
+   tag skips the image. Matching uses whole tags and ignores letter case and
+   extra spaces. The blacklist applies to every row; leave it blank to allow
+   all tags. Older saved comma-separated blacklists are converted on reopening.
+5. Select **Start downloads**. Rows run sequentially. **Stop** cancels the queue;
+   an active network request may need to return first. Closing the window
+   waits for cancellation and cleanup.
+
+Original image files are saved in `images/` as `<md5>.<original extension>`.
+Each download also saves `<md5>.txt` and `<md5>.csv` using the captioner's
+existing tag writer: categorized tags, readable spaces instead of underscores,
+safety/quality tags, and CSV source metadata. Gelbooru categories use the shared
+tag cache and API. Existing nonempty TXT files are preserved; skipped images
+are not modified. CSV metadata is enriched using the same rules as the captioner,
+preserving existing nonempty fields.
+
+The downloader remembers all rows and the blacklist when starting downloads
+or closing the window, and restores them on reopening. Settings are stored
+locally in `data/caches/downloader_settings.json`; reopening never starts
+downloads automatically.
+
+The log shows search pages, post IDs, original filenames, tag-file preparation,
+and reasons for skips (including the matching blacklist tags or existing MD5
+images). It also explains download failures and when the post limit is reached.
+Each row ends with downloaded, skipped, blacklisted, unavailable, and failed counts.
+
+Matching MD5 image filenames anywhere in `images/` or `done/` (including subfolders
+and converted images with a different extension) are skipped. Downloaded files
+are verified against the site's MD5 before publication; partial files are removed.
+Tag files are prepared separately before publication, so cancellation during tag
+preparation does not leave TXT/CSV files without an image. Failed image publication
+rolls back changes to tag files. The completion status reports errors explicitly.
+Existing images are never overwritten. API credentials use the existing
+`DANBOORU_LOGIN` / `DANBOORU_API_KEY` and `GELBOORU_USER_ID` /
+`GELBOORU_API_KEY` settings in `config.txt`. Site search and account limits apply.
 
 ## Setup
 
@@ -206,17 +259,24 @@ replaces each non-WebP input in `images/` with a WebP file. Successful
 finalization removes the processed image and source `.txt` from `images/` after
 placing them in `done/`.
 
-1. Create an `images/` folder if needed and place your images directly inside
-   it. Subfolders are not processed.
-2. Add any existing tags as matching text files, such as `sample.webp` and
+The **Caption images** tab has three boxes, from top to bottom:
+**1. Check setup**, **2. Download images (optional)**, and **3. Add images**.
+
+1. Start the GUI with `.\GUI.cmd` on Windows or `bash GUI.sh` on Linux.
+2. Review **1. Check setup** for configuration, API access, and Ollama readiness.
+   Missing Ollama models are reported and downloaded when captioning starts.
+3. Use **2. Download images (optional)** to download originals and matching tags,
+   or **3. Add images** to open `images/` and add your own files. Place images
+   directly inside `images/`; the captioner does not process subfolders.
+   **Copy / move by tags** opens the existing image-transfer tool.
+4. For manually added images, add any existing tags as matching text files,
+   such as `sample.webp` and
    `sample.txt`. A simple `sample.txt` might contain
    `1girl, blue_hair, outdoors`. MD5-named images support automatic Danbooru
    lookups. For a first run, provide a `.txt` file so you can test captioning
    without relying on local AnimeTimm model access.
-3. Start the GUI with `.\GUI.bat` on Windows or `bash GUI.sh` on Linux.
-4. Use **Check again** to confirm images, configuration, and Ollama are ready.
-   Missing Ollama models are reported and downloaded when the run starts.
-5. Choose your settings in the **Options** tab, then click **Start captioning**.
+5. Select **Check again** after adding or downloading images. Choose your settings
+   in the **Options** tab, then click **Start captioning**.
 6. Watch the current stage and open completed files or files needing review
    from the GUI. The **Activity** log is always visible. Use **Light / dark** to switch themes.
 
@@ -346,7 +406,7 @@ without moving files.
 The helper searches the selected file extension for tags (default `.txt`) and
 keeps matching images and sidecar files together. Enter another extension, such
 as `.tag` or `.combined`, to search those files instead.
-Click **Open copy/move images GUI** in the main caption GUI.
+Click **Copy / move by tags** in the captioning GUI's **3. Add images** box.
 
 ### Export captions as a ZIP
 

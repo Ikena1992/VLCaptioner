@@ -26,10 +26,10 @@ def gelbooru_get(section, **params):
             params[parameter] = value
     time.sleep(max(0, 0.5 - (time.monotonic() - _last_request)))
     try:
-        response = requests.get(API, params=params, timeout=30,
-                                headers={"User-Agent": "VLCaptioner/1.0", "Accept": "application/json"})
-        response.raise_for_status()
-        return response.json()
+        with requests.get(API, params=params, timeout=30,
+                          headers={"User-Agent": "VLCaptioner/1.0", "Accept": "application/json"}) as response:
+            response.raise_for_status()
+            return response.json()
     except (requests.RequestException, ValueError):
         # Request exception strings can contain the API key in the query URL.
         raise RuntimeError("Gelbooru request failed; check connectivity and GELBOORU_USER_ID/GELBOORU_API_KEY.") from None
@@ -53,13 +53,23 @@ def lookup_gelbooru(md5_hash):
     post = next((p for p in posts if str(p.get("md5", "")).lower() == md5_hash), None)
     if post is None:
         return None
+    return post_to_tags(post)
+
+
+def post_to_tags(post):
+    """Normalize a search or lookup post using the captioner's category cache."""
     tag_types = TagCategoryCache(CACHE_PATH)
-    names = unescape(post.get("tags", "")).split()
+    names = unescape(str(post.get("tags") or "")).split()
     missing = list(dict.fromkeys(name for name in names if name not in tag_types))
     for offset in range(0, len(missing), 100):
         batch = missing[offset:offset + 100]
         for tag in records(gelbooru_get("tag", names=" ".join(batch), limit=100), "tag"):
-            tag_types[unescape(tag["name"])] = int(tag["type"])
+            try:
+                name = unescape(tag["name"])
+                category = int(tag["type"])
+            except (KeyError, TypeError, ValueError):
+                raise RuntimeError("Unexpected Gelbooru tag category response.") from None
+            tag_types[name] = category
     groups = {category: [] for category in CATEGORIES.values()}
     for name in names:
         groups[CATEGORIES.get(tag_types.get(name), "general")].append(name)
@@ -72,7 +82,7 @@ def lookup_gelbooru(md5_hash):
     return {
         **{category: " ".join(tags) for category, tags in groups.items()},
         "source": "gelbooru", "post_id": post.get("id", ""),
-        "post_source": unescape(post.get("source", "")),
+        "post_source": unescape(str(post.get("source") or "")),
         # Gelbooru's former "safe" rating was renamed "sensitive" when
         # "general" was introduced as the fully work-safe category.
         "rating": {"general": "g", "safe": "s", "sensitive": "s", "questionable": "q", "explicit": "e"}.get(rating, rating),

@@ -16,5 +16,6 @@ data/danbooru_credentials.py
 __pycache__/
 *.pyc
 /test/
-/tests/
+/tests/*
+!/tests/test_booru_downloader.py
 /.test-tmp/

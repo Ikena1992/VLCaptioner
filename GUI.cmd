@@ -4,5 +4,5 @@ if not exist "%~dp0data\env\Scripts\pythonw.exe" (
     pause
     exit /b 1
 )
-start "" "%~dp0data\env\Scripts\pythonw.exe" "%~dp0GUI.pyw"
+start "" "%~dp0data\env\Scripts\pythonw.exe" "%~dp0data\GUI.pyw"
 exit /b 0

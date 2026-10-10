@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import traceback
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 os.chdir(ROOT)
 sys.path.insert(0, str(ROOT / "data"))
 
