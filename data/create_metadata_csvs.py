@@ -1,5 +1,8 @@
 import os
 import csv
+import tempfile
+from pathlib import Path
+from image_failures import is_skipped, skip_image
 import logging
 import requests
 import time
@@ -257,52 +260,91 @@ def tags_to_csv_row(md5_name, tags):
     }
 
 
+TAG_COLUMNS = ("characters", "copyright", "artists", "general", "meta",
+               "safety tags", "quality tag", "period")
+
+
+def merge_source_tags(md5_name, tags, row):
+    """Classify only new tags; keep existing post metadata and edited fields."""
+    existing = {normalize_for_danbooru(tag) for key in TAG_COLUMNS
+                for tag in split_txt_tags(row.get(key, ""))}
+    additions = []
+    for tag in tags:
+        normalized = normalize_for_danbooru(tag)
+        if normalized not in existing:
+            additions.append(tag)
+            existing.add(normalized)
+    if not additions:
+        return row, False
+    added = tags_to_csv_row(md5_name, additions)
+    result = dict(row)
+    for key in TAG_COLUMNS:
+        if added[key]:
+            result[key] = ", ".join(filter(None, [result.get(key, ""), added[key]]))
+    result["md5"] = md5_name
+    return result, True
+
+
 def write_csv(csv_file_path, row):
-    """Write one CSV file using the Danbooru updater's CSV schema."""
-    with open(csv_file_path, mode="w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDNAMES)
-        writer.writeheader()
-        writer.writerow(row)
-
-
-txt_files = [
-    f for f in os.listdir(INPUT_FOLDER)
-    if f.lower().endswith(".txt")
-]
-
-# Process TXT files into CSV files.
-unresolved_files = 0
-for filename in tqdm(txt_files, desc="Processing TXT files"):
-    md5_name = os.path.splitext(filename)[0]
-    csv_file_path = os.path.join(INPUT_FOLDER, f"{md5_name}.csv")
-
-    # Skip if CSV already exists
-    if os.path.exists(csv_file_path):
-        continue
-
-    file_path = os.path.join(INPUT_FOLDER, filename)
-
-    with open(file_path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    tags = split_txt_tags(content)
+    """Publish complete metadata without truncating the previous CSV."""
+    destination = Path(csv_file_path)
+    temporary = None
     try:
-        metadata = read_source_metadata(content)
-        if metadata is not None:
-            row = {key: str(metadata.get(key, "")) for key in CSV_FIELDNAMES}
-            row["md5"] = md5_name
-            original = {tag.casefold() for key in ("characters", "copyright", "artists", "general", "meta", "safety tags", "quality tag", "period") for tag in split_txt_tags(row[key])}
-            additions = [tag for tag in tags if tag.casefold() not in original]
-            if additions:
-                row["general"] = ", ".join(filter(None, [row["general"], *additions]))
-        else:
-            row = tags_to_csv_row(md5_name, tags)
-    except (RuntimeError, ValueError) as error:
-        unresolved_files += 1
-        print(f"Skipping {filename}: {error}. It will be retried next run.")
-        continue
-    write_csv(csv_file_path, row)
+        with tempfile.NamedTemporaryFile(mode="w", newline="", encoding="utf-8",
+                                         dir=destination.parent, suffix=".tmp", delete=False) as handle:
+            temporary = Path(handle.name)
+            fields = list(dict.fromkeys([*CSV_FIELDNAMES, *row]))
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            writer.writerow(row)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
-print("Processed TXT files into individual CSVs; images without TXT remain in images/.")
-print(f"Deferred {unresolved_files} file(s) with unresolved Danbooru categories.")
-print("Done!\n")
+
+def main():
+    txt_files = [p for p in Path(INPUT_FOLDER).iterdir() if p.is_file() and p.suffix.lower() == ".txt"]
+    unresolved_files = 0
+    for path in tqdm(txt_files, desc="Preparing metadata"):
+        if is_skipped(path):
+            continue
+        csv_path = path.with_suffix(".csv")
+        try:
+            content = path.read_text(encoding="utf-8-sig")
+            tags = split_txt_tags(content)
+            if not tags:
+                raise ValueError("Source tag file has no tags")
+            if csv_path.exists():
+                with csv_path.open(newline="", encoding="utf-8-sig") as handle:
+                    row = next(csv.DictReader(handle), None)
+                if row is None or None in row or any(value is None for value in row.values()) or not set(TAG_COLUMNS).issubset(row):
+                    raise ValueError("Existing CSV has missing metadata columns or no row")
+                for key in CSV_FIELDNAMES:
+                    row.setdefault(key, "")
+                row, changed = merge_source_tags(path.stem, tags, row)
+                if not changed:
+                    continue
+            else:
+                metadata = read_source_metadata(content)
+                if metadata is not None:
+                    row = {key: str(metadata.get(key, "")) for key in CSV_FIELDNAMES}
+                    row["md5"] = path.stem
+                    row, _ = merge_source_tags(path.stem, tags, row)
+                else:
+                    row = tags_to_csv_row(path.stem, tags)
+            write_csv(csv_path, row)
+        except (RuntimeError, ValueError, OSError, csv.Error) as error:
+            unresolved_files += 1
+            skip_image(path, error)
+            tqdm.write(f"Could not prepare {path.name}: {error}. Existing files were preserved; retry after fixing the issue.")
+    if unresolved_files:
+        print(f"Metadata unavailable for {unresolved_files} image(s); remaining images will continue.")
+    print("Metadata is ready; new source tags have been merged into existing CSVs.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

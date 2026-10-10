@@ -1,3 +1,4 @@
+from image_failures import is_skipped
 """Generate character reference descriptions with the configured Ollama model."""
 import csv
 import hashlib
@@ -87,9 +88,15 @@ def main():
         }
     candidates = {}
     for image in sorted(IMAGES.glob("*.*")):
+        if is_skipped(image):
+            continue
         if image.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".bmp"} or not image.with_suffix(".csv").exists():
             continue
-        characters, general = read_metadata(image)
+        try:
+            characters, general = read_metadata(image)
+        except (OSError, ValueError) as error:
+            tqdm.write(f"Skipping character reference {image.name}: {error}")
+            continue
         if not characters or ", " in characters or characters in existing or "solo" not in general.lower():
             continue
         if any(keyword in general.lower() for keyword in KEYWORDS):
@@ -98,7 +105,12 @@ def main():
     pending_candidates = {}
     exhausted = 0
     for tag, images in candidates.items():
-        pending = [(image, digest(image)) for image in images]
+        pending = []
+        for image in images:
+            try:
+                pending.append((image, digest(image)))
+            except OSError as error:
+                tqdm.write(f"Skipping character reference {image.name}: {error}")
         pending = [item for item in pending if (tag, item[1]) not in attempted]
         if not pending:
             exhausted += 1
@@ -113,10 +125,14 @@ def main():
         client.ensure_model(model, tqdm.write)
     for tag, pending in tqdm(pending_candidates.items(), desc="Character descriptions"):
         for image, image_hash in pending:
-            raw_description, _ = client.chat(
-                model, PROMPT, image,
-                {"temperature": 0.0, "num_predict": 256, "num_ctx": 4096},
-            )
+            try:
+                raw_description, _ = client.chat(
+                    model, PROMPT, image,
+                    {"temperature": 0.0, "num_predict": 256, "num_ctx": 4096},
+                )
+            except Exception as error:
+                tqdm.write(f"Skipping character reference {image.name}: {error}; trying another candidate")
+                continue
             description = normalize_description(raw_description)
             with sqlite3.connect(CACHE) as db:
                 db.execute(

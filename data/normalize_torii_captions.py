@@ -57,33 +57,40 @@ sorted_replacements = sorted(
     reverse=True
 )
 
+from image_failures import is_skipped, skip_image
+
 txt_files = list(IMAGES_DIR.glob("*.toriiOutput"))
 
 for filepath in tqdm(txt_files, desc="Processing files", unit="file"):
-    content = filepath.read_text(encoding="utf-8")
+    if is_skipped(filepath):
+        continue
+    try:
+        content = filepath.read_text(encoding="utf-8")
 
-    for old, new in sorted_replacements:
-        content = content.replace(old, new)
+        for old, new in sorted_replacements:
+            content = content.replace(old, new)
 
-    content = content.replace("{", "").replace("}", "")
+        content = content.replace("{", "").replace("}", "")
 
-    content = content.strip()
+        content = content.strip()
 
-    cleaned_lines = []
-    for line in content.splitlines():
-        stripped_line = line.strip()
-        if stripped_line in {">", "# <format>", "<format>", "</format>"}:
-            continue
-        if stripped_line.startswith("## # "):
-            line = "# " + stripped_line[len("## # "):]
-        cleaned_lines.append(line)
-    content = "\n".join(cleaned_lines).strip()
+        cleaned_lines = []
+        for line in content.splitlines():
+            stripped_line = line.strip()
+            if stripped_line in {">", "# <format>", "<format>", "</format>"}:
+                continue
+            if stripped_line.startswith("## # "):
+                line = "# " + stripped_line[len("## # "):]
+            cleaned_lines.append(line)
+        content = "\n".join(cleaned_lines).strip()
 
-    if content.startswith('"'):
-        content = content[1:]
-    if content.endswith('"'):
-        content = content[:-1]
+        if content.startswith('"'):
+            content = content[1:]
+        if content.endswith('"'):
+            content = content[:-1]
 
-    filepath.write_text(content, encoding="utf-8")
+        filepath.write_text(content, encoding="utf-8")
+    except Exception as error:
+        skip_image(filepath, error)
 
 print("Done.")

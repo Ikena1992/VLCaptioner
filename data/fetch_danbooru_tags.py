@@ -9,6 +9,8 @@ from tqdm import tqdm
 from danbooru_client import danbooru_get
 from gelbooru_client import lookup_gelbooru
 from year_tags import get_year_tag
+from source_tag_file import has_source_tags
+from image_failures import is_skipped, skip_image
 
 # ---------------- CONFIG ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))  # script location
@@ -66,12 +68,12 @@ def save_tags(md5_hash, tags, overwrite_existing_txt=False):
         "year tag": get_year_tag(tags.get("created_at", "")),
     }
     # Enrich legacy CSVs without discarding manually edited/tagger-added fields.
-    if os.path.exists(csv_path):
+    if os.path.exists(csv_path) and not overwrite_existing_txt:
         with open(csv_path, newline="", encoding="utf-8-sig") as handle:
             old = next(csv.DictReader(handle), {})
         row.update({key: value for key, value in old.items() if key and value})
     row["quality tag"] = get_quality_tag(row.get("score"), row.get("rating")) or normalize_quality_tag(row["quality tag"])
-    if overwrite_existing_txt or not os.path.exists(txt_path):
+    if overwrite_existing_txt or not has_source_tags(Path(txt_path)):
         all_tags = [row[key] for key in ("characters", "copyright", "artists", "general", "meta", "safety tags", "quality tag") if row[key]]
         Path(txt_path).write_text(", ".join(all_tags) + "\n", encoding="utf-8")
     temporary = Path(csv_path + ".tmp")
@@ -90,6 +92,8 @@ def main(overwrite_existing_txt=False):
              if f.lower().endswith(IMAGE_EXTENSIONS)]
 
     for file in tqdm(files, desc="Processing images"):
+        if is_skipped(Path(IMAGE_FOLDER) / file):
+            continue
         base, ext = os.path.splitext(file)
         md5_hash = base.lower()
 
@@ -98,7 +102,11 @@ def main(overwrite_existing_txt=False):
             continue
 
         txt_path = os.path.join(IMAGE_FOLDER, f"{md5_hash}.txt")
-        if os.path.exists(txt_path) and not overwrite_existing_txt:
+        try:
+            if has_source_tags(Path(txt_path)) and not overwrite_existing_txt:
+                continue
+        except (OSError, UnicodeError) as error:
+            skip_image(Path(IMAGE_FOLDER) / file, error)
             continue
 
         tqdm.write(f"\nProcessing MD5: {md5_hash}")
@@ -115,7 +123,10 @@ def main(overwrite_existing_txt=False):
             continue
 
         tqdm.write(f"Found tags on {tags.get('source', '')}, score: {tags.get('score', 0)}")
-        save_tags(md5_hash, tags, overwrite_existing_txt=overwrite_existing_txt)
+        try:
+            save_tags(md5_hash, tags, overwrite_existing_txt=overwrite_existing_txt)
+        except Exception as error:
+            skip_image(Path(IMAGE_FOLDER) / file, error)
 
     print("Done!\n")
 

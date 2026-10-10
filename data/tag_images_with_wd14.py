@@ -1,4 +1,4 @@
-from source_tag_file import MARKER, read_source_tags
+from source_tag_file import MARKER, read_source_tags, has_source_tags
 import argparse
 import sys
 import os
@@ -6,6 +6,7 @@ import tempfile
 import json
 from pathlib import Path
 from model_access import ModelAccessError, load_with_access_error
+from image_failures import is_skipped, skip_image
 
 import pandas as pd
 import numpy as np
@@ -357,19 +358,13 @@ def predict_tags(
     ]
 
 
-def has_source_tags(txt_path: Path) -> bool:
-    if not txt_path.exists():
-        return False
-    if not txt_path.is_file():
-        raise IsADirectoryError(f"Tag-file path is not a file: {txt_path}")
-    return bool(split_tags(txt_path.read_text(encoding="utf-8-sig")))
-
-
 def find_images_without_txt(image_folder: Path) -> list[Path]:
     image_paths = []
 
     for path in image_folder.iterdir():
         if not path.is_file():
+            continue
+        if is_skipped(path):
             continue
 
         if path.suffix.lower() not in IMAGE_EXTENSIONS:
@@ -377,7 +372,11 @@ def find_images_without_txt(image_folder: Path) -> list[Path]:
 
         txt_path = path.with_suffix(".txt")
 
-        if has_source_tags(txt_path):
+        try:
+            if has_source_tags(txt_path):
+                continue
+        except (OSError, UnicodeError) as error:
+            skip_image(path, error)
             continue
 
         image_paths.append(path)
@@ -386,13 +385,16 @@ def find_images_without_txt(image_folder: Path) -> list[Path]:
 
 
 def find_images_with_txt(image_folder: Path) -> list[Path]:
-    return sorted(
-        path
-        for path in image_folder.iterdir()
-        if path.is_file()
-        and path.suffix.lower() in IMAGE_EXTENSIONS
-        and has_source_tags(path.with_suffix(".txt"))
-    )
+    result = []
+    for path in image_folder.iterdir():
+        if not path.is_file() or is_skipped(path) or path.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
+        try:
+            if has_source_tags(path.with_suffix(".txt")):
+                result.append(path)
+        except (OSError, UnicodeError) as error:
+            skip_image(path, error)
+    return sorted(result)
 
 
 def split_tags(content: str) -> list[str]:
@@ -455,15 +457,21 @@ def main():
     untagged_image_paths = find_images_without_txt(image_folder)
     tagged_image_paths = find_images_with_txt(image_folder)
     sidecars = {}
+    conflicts = set()
     for image_path in [*untagged_image_paths, *tagged_image_paths]:
         txt_path = image_path.with_suffix(".txt")
         if txt_path in sidecars:
-            raise ValueError(
+            error = (
                 f"Images share the same tag file {txt_path.name}: "
                 f"{sidecars[txt_path].name} and {image_path.name}. "
                 "Rename one image before tagging."
             )
+            skip_image(image_path, error)
+            skip_image(sidecars[txt_path], error)
+            conflicts.update([image_path, sidecars[txt_path]])
         sidecars[txt_path] = image_path
+    untagged_image_paths = [p for p in untagged_image_paths if p not in conflicts]
+    tagged_image_paths = [p for p in tagged_image_paths if p not in conflicts]
 
     if not untagged_image_paths and not tagged_image_paths:
         print(f"No images found in: {image_folder}")
@@ -517,6 +525,7 @@ def main():
 
         except Exception as error:
             failed_count += 1
+            skip_image(image_path, error)
             tqdm.write(f"Failed: {image_path.name} | {error}")
 
     existing_txt_images = [] if args.skip_high_confidence_missing_tags else tagged_image_paths
@@ -535,12 +544,13 @@ def main():
             )
         except Exception as error:
             failed_count += 1
+            skip_image(image_path, error)
             tqdm.write(f"Failed: {image_path.name} | {error}")
 
     print("----------------------------------------------------")
     if failed_count:
         print(f"Tagging failed for {failed_count} image(s). Completed work is kept.", file=sys.stderr)
-        raise SystemExit(1)
+        return
     print("Done.")
 
 

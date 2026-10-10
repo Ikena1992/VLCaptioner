@@ -1,5 +1,6 @@
 import os
 import tempfile
+from image_failures import is_skipped, skip_image
 from PIL import Image, ImageOps, UnidentifiedImageError
 from tqdm import tqdm
 
@@ -34,6 +35,7 @@ def verify_webp(output_path):
 image_files = [
     f for f in os.listdir(folder_path)
     if f.lower().endswith(image_extensions) and os.path.isfile(os.path.join(folder_path, f))
+    and not is_skipped(os.path.join(folder_path, f))
 ]
 
 failed_files = []
@@ -92,6 +94,7 @@ for filename in tqdm(image_files, desc="Converting images", unit="image"):
         if temp_file_path is not None and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
         failed_files.append((file_path, str(error)))
+        skip_image(file_path, error)
         tqdm.write(f"Skipped {file_path}: {error}")
 
 print(f"Converted {len(image_files) - len(failed_files)} image(s) to WebP.")
@@ -100,5 +103,3 @@ if failed_files:
     for file_path, error in failed_files:
         print(f"  {file_path}: {error}")
 print("Done!\n")
-if failed_files:
-    raise SystemExit(1)

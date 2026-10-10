@@ -3,8 +3,10 @@
 import argparse
 import subprocess
 import sys
+import os
+from image_failures import ENV_KEY, reset_failures, failures
 
-from pipeline import ROOT, STAGES, stage_command
+from pipeline import ROOT, STAGES, stage_command, stage_skip_reason, stage_description
 
 
 def main() -> int:
@@ -20,8 +22,19 @@ def main() -> int:
     parser.add_argument("--add-year-tag", action="store_true")
     parser.add_argument("--add-copyright-tags", action="store_true")
     args = parser.parse_args()
+    os.environ[ENV_KEY] = reset_failures()
+    options = dict(overwrite_danbooru_txt=args.overwrite_danbooru_txt,
+                   overwrite_caption_cache=args.overwrite_caption_cache,
+                   skip_wd14_high_confidence=args.skip_wd14,
+                   add_year_tag=args.add_year_tag, add_copyright_tags=args.add_copyright_tags,
+                   overwrite_caption_files=args.overwrite_caption_files)
     for stage in STAGES:
+        reason = stage_skip_reason(stage, ROOT / "images", **options)
+        if reason:
+            print(f"Skipped {stage.label}: {reason}", flush=True)
+            continue
         print(f"\n=== {stage.label} ===", flush=True)
+        print(stage_description(stage, **options), flush=True)
         result = subprocess.run(
             stage_command(
                 stage,
@@ -37,7 +50,7 @@ def main() -> int:
         )
         if result.returncode:
             return result.returncode
-    print("\nAll scripts ran successfully!")
+    print(f"\nRun finished. Skipped images: {len(failures())}. Originals are kept for retry.")
     return 0
 
 

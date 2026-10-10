@@ -1,320 +1,282 @@
-import os
+import queue
 import re
 import shutil
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
+from tkinter import filedialog, messagebox
 
-IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".avif")
-SIDECAR_EXTENSIONS = (".txt", ".combined", ".long", ".short", ".tag")
+import ttkbootstrap as ttk
+
+IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.avif', '.tif', '.tiff')
+SIDECAR_EXTENSIONS = ('.txt', '.combined', '.long', '.short', '.tag', '.naturallanguage')
+GIF_PATH = Path(__file__).resolve().parent / 'dance.gif'
 
 
 def normalize_target_extension(value):
     extension = value.strip().lower()
-    if extension and not extension.startswith("."):
-        extension = "." + extension
-    if not re.fullmatch(r"\.[a-z0-9]+", extension):
-        raise ValueError("Enter one file extension, such as .txt or .tag.")
+    if extension and not extension.startswith('.'):
+        extension = '.' + extension
+    if not re.fullmatch(r'\.[a-z0-9]+', extension):
+        raise ValueError('Enter one file extension, such as .txt or .tag.')
     return extension
 
 
-# --- PATH SETUP ---
-SCRIPT_DIR = Path(__file__).parent.resolve()
-GIF_PATH = SCRIPT_DIR / "dance.gif"
-
-# --- GLOBALS ---
-stop_requested = False
-gif_running = False
-gif_frames = []
-gif_index = 0
+def matches(content, keywords, excluded, search_mode, contains):
+    content = content.lower()
+    tags = {tag.strip() for tag in content.replace('\n', ',').split(',') if tag.strip()}
+    tag_match = bool(keywords) and (all(word in tags for word in keywords) if search_mode == 'AND'
+                                   else any(word in tags for word in keywords))
+    return (tag_match or bool(contains and contains in content)) and not any(word in tags for word in excluded)
 
 
-def select_source():
-    folder = filedialog.askdirectory()
-    source_entry.delete(0, tk.END)
-    source_entry.insert(0, folder)
-
-
-def select_destination():
-    folder = filedialog.askdirectory()
-    dest_entry.delete(0, tk.END)
-    dest_entry.insert(0, folder)
-
-
-def set_buttons_state(running):
-    if running:
-        copy_btn.config(state="disabled")
-        move_btn.config(state="disabled")
-        cancel_btn.config(state="normal")
-        start_gif()
-    else:
-        copy_btn.config(state="normal")
-        move_btn.config(state="normal")
-        cancel_btn.config(state="disabled")
-        stop_gif()
-
-
-def request_cancel():
-    global stop_requested
-    stop_requested = True
-    status_label.config(text="Cancelling...")
-
-
-def safe_transfer(src, dst, mode):
+def transfer(settings, cancel, emit):
+    """Perform filesystem work only; report results to the UI through its queue."""
+    scanned = matched = transferred = skipped = errors = 0
     try:
-        if mode == "copy":
-            shutil.copy2(src, dst)
-        else:
-            shutil.move(src, dst)
-        return True
-    except Exception as e:
-        print(f"Error processing {src}: {e}")
-        return False
-
-
-def transfer_files(mode="copy"):
-    global stop_requested
-    stop_requested = False
-
-    source = source_entry.get()
-    dest = dest_entry.get()
-    user_input = search_entry.get()
-    contains_input = contains_entry.get().lower().strip()
-    exclude_input = exclude_entry.get()
-    try:
-        target_extension = normalize_target_extension(extension_entry.get())
-    except ValueError as error:
-        messagebox.showerror("Invalid file extension", str(error))
-        return
-
-    if not source or not dest:
-        messagebox.showerror("Error", "Fill source and destination.")
-        return
-
-    set_buttons_state(True)
-
-    keywords = [k.strip().lower() for k in user_input.split(",") if k.strip()]
-    exclude_keywords = [k.strip().lower() for k in exclude_input.split(",") if k.strip()]
-
-    target_files = [f for f in os.listdir(source) if f.lower().endswith(target_extension)]
-
-    progress["maximum"] = len(target_files)
-    progress["value"] = 0
-    status_label.config(text=f"0 / {len(target_files)}")
-
-    copied = 0
-
-    for i, file in enumerate(target_files):
-
-        if stop_requested:
-            status_label.config(text="Cancelled")
-            break
-
-        target_path = os.path.join(source, file)
-        base = os.path.splitext(file)[0]
-
-        try:
-            with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read().lower()
-        except:
-            continue
-
-        tags = {t.strip() for t in content.replace("\n", ",").split(",") if t.strip()}
-
-        if keywords:
-            if search_mode.get() == "AND":
-                tag_match = all(keyword in tags for keyword in keywords)
-            else:
-                tag_match = any(keyword in tags for keyword in keywords)
-        else:
-            tag_match = False
-
-        if exclude_keywords:
-            exclude_match = any(keyword in tags for keyword in exclude_keywords)
-        else:
-            exclude_match = False
-
-        if contains_mode.get() and contains_input:
-            contains_match = contains_input in content
-        else:
-            contains_match = False
-
-        match = (tag_match or contains_match) and not exclude_match
-
-        if match:
-            if safe_transfer(target_path, os.path.join(dest, file), mode):
-                copied += 1
-
-            nl_file = base + ".naturalLanguage"
-            nl_path = os.path.join(source, nl_file)
-            if nl_file != file and os.path.exists(nl_path):
-                if safe_transfer(nl_path, os.path.join(dest, nl_file), mode):
-                    copied += 1
-
-            for ext in IMAGE_EXTENSIONS:
-                img_path = os.path.join(source, base + ext)
-                if os.path.exists(img_path):
-                    if safe_transfer(img_path, os.path.join(dest, base + ext), mode):
-                        copied += 1
-                    break
-
-            for ext in SIDECAR_EXTENSIONS:
-                sidecar = base + ext
-                sidecar_path = os.path.join(source, sidecar)
-                if sidecar != file and os.path.exists(sidecar_path):
-                    if safe_transfer(sidecar_path, os.path.join(dest, sidecar), mode):
-                        copied += 1
-
-        progress["value"] = i + 1
-        status_label.config(text=f"{i+1} / {len(target_files)}")
-        root.update_idletasks()
-
-    else:
-        status_label.config(text="Done")
-        messagebox.showinfo("Done", f"{copied} files processed.")
-
-    set_buttons_state(False)
-
-
-def start_transfer(mode):
-    threading.Thread(target=transfer_files, args=(mode,), daemon=True).start()
-
-
-# --- GIF HANDLING ---
-def load_gif():
-    global gif_frames
-
-    gif_frames.clear()
-
-    if not GIF_PATH.exists():
-        print(f"GIF not found: {GIF_PATH}")
-        return
-
-    try:
-        i = 0
-        while True:
-            frame = tk.PhotoImage(file=str(GIF_PATH), format=f"gif -index {i}")
-
+        source, destination = settings['source'], settings['destination']
+        files = sorted((path for path in source.iterdir() if path.is_file()), key=lambda path: path.name.lower())
+        candidates = [path for path in files if path.suffix.lower() == settings['extension']]
+        groups = {}
+        for path in files:
+            groups.setdefault(path.stem.casefold(), []).append(path)
+        emit(('progress', 0, len(candidates), 'Scanning caption files…'))
+        for caption in candidates:
+            if cancel.is_set():
+                break
+            scanned += 1
             try:
-                frame = frame.copy()
-            except:
-                pass
-
-            gif_frames.append(frame)
-            i += 1
-
-    except tk.TclError:
-        pass
-
-    if not gif_frames:
-        print("No GIF frames loaded!")
-    else:
-        print(f"Loaded {len(gif_frames)} frames from {GIF_PATH}")
-        gif_label.config(image=gif_frames[0])
-        gif_label.image = gif_frames[0]
-
-
-def animate_gif():
-    global gif_index, gif_running
-
-    if not gif_running or not gif_frames:
-        return
-
-    frame = gif_frames[gif_index]
-
-    gif_label.config(image=frame)
-    gif_label.image = frame
-
-    gif_index = (gif_index + 1) % len(gif_frames)
-
-    root.after(50, animate_gif)
-
-
-def start_gif():
-    global gif_running
-    gif_running = True
-    animate_gif()
-
-
-def stop_gif():
-    global gif_running, gif_frames
-
-    gif_running = False
-
-    # Keep visible frame instead of clearing
-    if gif_frames:
-        gif_label.config(image=gif_frames[0])
-        gif_label.image = gif_frames[0]
+                content = caption.read_text(encoding='utf-8-sig')
+                if matches(content, settings['keywords'], settings['excluded'], settings['mode'], settings['contains']):
+                    matched += 1
+                    bundle = [path for path in groups[caption.stem.casefold()]
+                              if path == caption or path.suffix.lower() in IMAGE_EXTENSIONS + SIDECAR_EXTENSIONS]
+                    # Check the whole group before moving anything. Never overwrite a destination file.
+                    conflicts = [path.name for path in bundle if (destination / path.name).exists()]
+                    if conflicts:
+                        skipped += 1
+                        emit(('log', f'Skipped {caption.stem}: destination already contains {", ".join(conflicts)}'))
+                    else:
+                        # Copy/move images first so a failed image transfer leaves its captions in place.
+                        bundle.sort(key=lambda path: path.suffix.lower() not in IMAGE_EXTENSIONS)
+                        for path in bundle:
+                            target = destination / path.name
+                            if settings['action'] == 'copy':
+                                # Exclusive creation also protects against files created after the preflight check.
+                                with path.open('rb') as reader, target.open('xb') as writer:
+                                    try:
+                                        shutil.copyfileobj(reader, writer)
+                                    except Exception:
+                                        writer.close()
+                                        target.unlink(missing_ok=True)
+                                        raise
+                                shutil.copystat(path, target)
+                            else:
+                                # Copy first, then remove the source only after the complete file is saved.
+                                with path.open('rb') as reader, target.open('xb') as writer:
+                                    try:
+                                        shutil.copyfileobj(reader, writer)
+                                    except Exception:
+                                        writer.close()
+                                        target.unlink(missing_ok=True)
+                                        raise
+                                shutil.copystat(path, target)
+                                path.unlink()
+                            transferred += 1
+                        emit(('log', f'{"Copied" if settings["action"] == "copy" else "Moved"}: {caption.stem} ({len(bundle)} files)'))
+            except Exception as error:
+                errors += 1
+                emit(('log', f'Error for {caption.name}: {error}. Continuing with the next caption.'))
+            emit(('progress', scanned, len(candidates), caption.name))
+    except Exception as error:
+        errors += 1
+        emit(('log', f'Transfer could not continue: {error}'))
+    finally:
+        emit(('done', cancel.is_set(), scanned, matched, transferred, skipped, errors))
 
 
-# --- GUI ---
-root = tk.Tk()
-root.title("Momiji is a virus! she mines crypto!")
-root.geometry("500x650")
+class CopyMoveApp:
+    def __init__(self, root):
+        self.root = root
+        self.events = queue.Queue()
+        self.cancel = threading.Event()
+        self.running = False
+        self.closing = False
+        self.gif_frames = []
+        self.gif_index = 0
+        self.gif_job = None
+        self.controls = []
+        root.title('Copy / move images by tags')
+        root.geometry('880x760')
+        root.minsize(760, 680)
+        root.protocol('WM_DELETE_WINDOW', self.close)
+        panel = ttk.Frame(root, padding=20)
+        panel.pack(fill='both', expand=True)
+        ttk.Label(panel, text='Copy / move images', font=('', 20, 'bold')).pack(anchor='w')
+        ttk.Label(panel, text='Find matching captions and transfer their images and companion files.').pack(anchor='w', pady=(4, 16))
+        folders = ttk.Labelframe(panel, text='Folders', padding=12)
+        folders.pack(fill='x')
+        folders.columnconfigure(1, weight=1)
+        self.source = tk.StringVar(value=str(Path(__file__).resolve().parent.parent / 'done'))
+        self.destination = tk.StringVar()
+        for row, (label, variable) in enumerate((('Source', self.source), ('Destination', self.destination))):
+            ttk.Label(folders, text=label).grid(row=row, column=0, sticky='w', padx=(0, 12), pady=4)
+            entry = ttk.Entry(folders, textvariable=variable)
+            entry.grid(row=row, column=1, sticky='ew', pady=4)
+            button = ttk.Button(folders, text='Browse…', bootstyle='secondary-outline', command=lambda v=variable: self.browse(v))
+            button.grid(row=row, column=2, padx=(8, 0), pady=4)
+            self.controls.extend((entry, button))
+        filters = ttk.Labelframe(panel, text='Match captions', padding=12)
+        filters.pack(fill='x', pady=12)
+        filters.columnconfigure(1, weight=1)
+        self.extension = tk.StringVar(value='.txt')
+        self.tags = tk.StringVar()
+        self.excluded = tk.StringVar()
+        self.contains = tk.StringVar()
+        for row, (label, variable) in enumerate((('Caption extension', self.extension), ('Include tags', self.tags), ('Exclude tags', self.excluded), ('Text contains', self.contains))):
+            ttk.Label(filters, text=label).grid(row=row, column=0, sticky='w', padx=(0, 12), pady=4)
+            entry = ttk.Entry(filters, textvariable=variable)
+            entry.grid(row=row, column=1, sticky='ew', pady=4)
+            self.controls.append(entry)
+        self.mode = tk.StringVar(value='OR')
+        modes = ttk.Frame(filters)
+        modes.grid(row=4, column=1, sticky='w', pady=6)
+        for label, value in (('Any included tag (OR)', 'OR'), ('All included tags (AND)', 'AND')):
+            control = ttk.Radiobutton(modes, text=label, variable=self.mode, value=value)
+            control.pack(side='left', padx=(0, 16))
+            self.controls.append(control)
+        ttk.Label(filters, text='OR: match at least one included tag. AND: match every included tag.\nSeparate tags with commas. Text matches also qualify; any excluded tag rejects a match.', wraplength=680).grid(row=5, column=0, columnspan=2, sticky='w')
+        actions = ttk.Frame(panel)
+        actions.pack(fill='x')
+        for label, action, style in (('Copy matching files', 'copy', 'primary'), ('Move matching files', 'move', 'warning')):
+            button = ttk.Button(actions, text=label, bootstyle=style, command=lambda a=action: self.start(a))
+            button.pack(side='left', padx=(0, 8))
+            self.controls.append(button)
+        self.cancel_button = ttk.Button(actions, text='Cancel', bootstyle='secondary-outline', state='disabled', command=self.request_cancel)
+        self.cancel_button.pack(side='left')
+        self.gif_label = ttk.Label(actions)
+        self.gif_label.pack(side='right')
+        self.progress = ttk.Progressbar(panel, mode='determinate')
+        self.progress.pack(fill='x', pady=(12, 6))
+        self.status = ttk.Label(panel, text='Ready — existing destination files will be skipped.', wraplength=800)
+        self.status.pack(anchor='w')
+        self.log = tk.Text(panel, height=7, wrap='word', state='disabled', background='#20252b', foreground='#eeeeee', relief='flat')
+        self.log.pack(fill='both', expand=True, pady=(10, 0))
+        self.load_gif()
+        root.after(50, self.poll)
 
-tk.Label(root, text="Image Folder").pack()
-source_entry = tk.Entry(root, width=50)
-source_entry.pack()
-tk.Button(root, text="Browse", command=select_source).pack(pady=5)
+    def browse(self, variable):
+        folder = filedialog.askdirectory(parent=self.root, initialdir=variable.get() or None)
+        if folder:
+            variable.set(folder)
 
-tk.Label(root, text="Destination Folder").pack()
-dest_entry = tk.Entry(root, width=50)
-dest_entry.pack()
-tk.Button(root, text="Browse", command=select_destination).pack(pady=5)
+    def start(self, action):
+        if self.running:
+            return
+        try:
+            if not self.source.get().strip() or not self.destination.get().strip():
+                raise ValueError('Choose both source and destination folders.')
+            source = Path(self.source.get().strip()).resolve()
+            destination = Path(self.destination.get().strip()).resolve()
+            if not source.is_dir():
+                raise ValueError('The source folder does not exist.')
+            if source == destination:
+                raise ValueError('Source and destination must be different folders.')
+            extension = normalize_target_extension(self.extension.get())
+            keywords = [tag.strip().lower() for tag in self.tags.get().split(',') if tag.strip()]
+            contains = self.contains.get().strip().lower()
+            if not keywords and not contains:
+                raise ValueError('Enter at least one included tag or some text to search for.')
+            destination.mkdir(parents=True, exist_ok=True)
+            settings = dict(source=source, destination=destination, extension=extension, keywords=keywords,
+                            excluded=[tag.strip().lower() for tag in self.excluded.get().split(',') if tag.strip()],
+                            contains=contains, mode=self.mode.get(), action=action)
+        except (ValueError, OSError) as error:
+            messagebox.showerror('Cannot start transfer', str(error), parent=self.root)
+            return
+        self.running = True
+        self.cancel.clear()
+        for control in self.controls:
+            control.configure(state='disabled')
+        self.cancel_button.configure(state='normal')
+        self.progress.configure(value=0)
+        self.status.configure(text='Starting transfer…')
+        self.animate_gif()
+        threading.Thread(target=transfer, args=(settings, self.cancel, self.events.put), daemon=True).start()
 
-tk.Label(root, text="Search File Extension").pack()
-extension_entry = tk.Entry(root, width=20)
-extension_entry.insert(0, ".txt")
-extension_entry.pack(pady=5)
+    def request_cancel(self):
+        self.cancel.set()
+        self.cancel_button.configure(state='disabled')
+        self.status.configure(text='Cancelling after the current image and its companion files…')
 
-tk.Label(root, text="Search Tags").pack()
-tk.Label(root, text="Example: 1girl, blonde hair").pack()
-search_entry = tk.Entry(root, width=55)
-search_entry.pack(pady=5)
+    def poll(self):
+        for _ in range(100):
+            try:
+                event = self.events.get_nowait()
+            except queue.Empty:
+                break
+            if event[0] == 'progress':
+                _, current, total, name = event
+                self.progress.configure(maximum=max(total, 1), value=current)
+                if not self.cancel.is_set():
+                    self.status.configure(text=f'{current:,} / {total:,} captions checked — {name}')
+            elif event[0] == 'log':
+                self.log.configure(state='normal')
+                self.log.insert('end', event[1] + '\n')
+                if int(self.log.index('end-1c').split('.')[0]) > 1000:
+                    self.log.delete('1.0', '2.0')
+                self.log.see('end')
+                self.log.configure(state='disabled')
+            elif event[0] == 'done':
+                _, cancelled, scanned, matched, transferred, skipped, errors = event
+                self.running = False
+                self.stop_gif()
+                for control in self.controls:
+                    control.configure(state='normal')
+                self.cancel_button.configure(state='disabled')
+                self.status.configure(text=f'{"Cancelled" if cancelled else "Finished"}: {scanned:,} captions checked, {matched:,} matched, {transferred:,} files transferred, {skipped:,} groups skipped, {errors:,} errors.')
+                if self.closing:
+                    self.root.destroy()
+                    return
+        self.root.after(50, self.poll)
 
-search_mode = tk.StringVar(value="OR")
-mode_frame = tk.Frame(root)
-mode_frame.pack()
+    def load_gif(self):
+        if not GIF_PATH.exists():
+            return
+        index = 0
+        try:
+            while True:
+                self.gif_frames.append(tk.PhotoImage(master=self.root, file=str(GIF_PATH), format=f'gif -index {index}'))
+                index += 1
+        except tk.TclError:
+            pass
+        if self.gif_frames:
+            self.gif_label.configure(image=self.gif_frames[0])
 
-tk.Radiobutton(mode_frame, text="OR", variable=search_mode, value="OR").pack(side=tk.LEFT, padx=10)
-tk.Radiobutton(mode_frame, text="AND", variable=search_mode, value="AND").pack(side=tk.LEFT, padx=10)
+    def animate_gif(self):
+        if not self.running or not self.gif_frames:
+            return
+        self.gif_label.configure(image=self.gif_frames[self.gif_index])
+        self.gif_index = (self.gif_index + 1) % len(self.gif_frames)
+        self.gif_job = self.root.after(50, self.animate_gif)
 
-tk.Label(root, text="Exclude Tags").pack()
-exclude_entry = tk.Entry(root, width=55)
-exclude_entry.pack(pady=5)
+    def stop_gif(self):
+        if self.gif_job is not None:
+            self.root.after_cancel(self.gif_job)
+            self.gif_job = None
+        self.gif_index = 0
+        if self.gif_frames:
+            self.gif_label.configure(image=self.gif_frames[0])
 
-tk.Label(root, text="Contains Text (optional)").pack()
-contains_entry = tk.Entry(root, width=55)
-contains_entry.pack(pady=5)
+    def close(self):
+        if self.running:
+            self.closing = True
+            self.request_cancel()
+        else:
+            self.root.destroy()
 
-contains_mode = tk.BooleanVar(value=False)
-tk.Checkbutton(root, text="Enable contains search", variable=contains_mode).pack()
 
-# --- BUTTON ROW WITH GIF ---
-action_frame = tk.Frame(root)
-action_frame.pack(pady=10)
-
-copy_btn = tk.Button(action_frame, text="Copy Files", command=lambda: start_transfer("copy"))
-copy_btn.grid(row=0, column=0, padx=5)
-
-move_btn = tk.Button(action_frame, text="Move Files", command=lambda: start_transfer("move"))
-move_btn.grid(row=0, column=1, padx=5)
-
-cancel_btn = tk.Button(action_frame, text="Cancel", command=request_cancel, state="disabled")
-cancel_btn.grid(row=0, column=2, padx=5)
-
-gif_label = tk.Label(action_frame)
-gif_label.grid(row=0, column=3, padx=10)
-
-# --- PROGRESS ---
-progress = ttk.Progressbar(root, orient="horizontal", length=320, mode="determinate")
-progress.pack(pady=5)
-
-status_label = tk.Label(root, text="Idle")
-status_label.pack()
-
-# Load GIF
-load_gif()
-
-root.mainloop()
+if __name__ == '__main__':
+    app_root = ttk.Window(themename='bootstrap-dark')
+    CopyMoveApp(app_root)
+    app_root.mainloop()

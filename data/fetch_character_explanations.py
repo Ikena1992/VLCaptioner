@@ -131,8 +131,15 @@ def load_tags_from_folder(folder):
     tags = set()
     for filename in os.listdir(folder):
         if filename.endswith(".txt"):
-            with open(os.path.join(folder, filename), "r", encoding="utf-8") as f:
-                tags.update(t.strip() for t in read_source_tags(f.read()).split(",") if t.strip())
+            from image_failures import is_skipped, skip_image
+            path = os.path.join(folder, filename)
+            if is_skipped(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8-sig") as f:
+                    tags.update(t.strip() for t in read_source_tags(f.read()).split(",") if t.strip())
+            except (OSError, UnicodeError) as error:
+                skip_image(path, error)
     return sorted(tags)
 
 # -------------------------------

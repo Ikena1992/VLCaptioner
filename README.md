@@ -115,7 +115,7 @@ data/env/bin/hf auth login
 
 Follow the login prompts. Images still without text tag files after the
 Danbooru step are tagged by AnimeTimm, regardless of the GUI checkbox. In the
-GUI, enable **Add high-confidence WD14 tags to existing tag files** to also
+GUI, enable **Add missing tags to existing tag files** to also
 append missing high-confidence WD14 tags to existing text files.
 
 ## Configuration
@@ -212,12 +212,12 @@ placing them in `done/`.
 3. Start the GUI with `.\GUI.bat` on Windows or `bash GUI.sh` on Linux.
 4. Use **Check again** to confirm images, configuration, and Ollama are ready.
    Missing Ollama models are reported and downloaded when the run starts.
-5. Choose any **Advanced options**, then click **Start captioning**.
+5. Choose your settings in the **Options** tab, then click **Start captioning**.
 6. Watch the current stage and open completed files or files needing review
-   from the GUI. Expand **Show detailed log** to inspect failures.
+   from the GUI. The **Activity** log is always visible. Use **Light / dark** to switch themes.
 
-Files with the same base filename share an output name and can overwrite one
-another during conversion or finalization.
+Rename images with the same base filename before starting. Conversion and
+tagging skip conflicting images to protect existing files.
 
 ### Automatic Danbooru tags
 
@@ -241,9 +241,9 @@ image files.
 
 | Option | On | Off (default) |
 | --- | --- | --- |
-| **Add high-confidence WD14 tags to existing tag files** | Appends missing high-confidence tags. | Leaves existing tag files unchanged. Images without tags are tagged either way. |
+| **Add missing tags to existing tag files** | Appends missing high-confidence tags. | Leaves existing tag files unchanged. Images without tags are tagged either way. |
 | **Replace existing tags with fresh Danbooru or Gelbooru tags** | Replaces matching source tags with tags from the first matching post. | Keeps existing tag files and skips their lookup. |
-| **Regenerate cached captions** | Bypasses saved caption cache entries when generating. | Reuses cached captions when available. Existing files are controlled by the option below. |
+| **Bypass refinement caption cache** | Generates fresh refinement output where needed. Torii reports and Parquet inputs are reused. | Reuses cached captions when available. Existing files are controlled by the option below. |
 | **Overwrite existing .long and .short files** | Replaces both caption files even when they already exist; cache use follows the setting above. | Keeps existing `.long` files and skips images that have both caption files. |
 | **Add upload year to .tag files** | Adds `year YYYY` when a post date is available. | Omits the year tag. |
 | **Include copyright and series tags in .tag files** | Includes them in `.tag` and `.combined`. | Omits them there; source TXT and CSV retain them. |
@@ -259,6 +259,19 @@ tags. Each asset set is checked before publication: passing sets go straight to
 `done/`, and flagged sets go straight to `captionReview/`. Existing caches are
 reused when available.
 
+The **Steps** tab shows how the selected options affect each step. During a
+run it reports Pending, Running, Done, Skipped, Failed, or Stopped. Work is
+checked immediately before each step, so tags fetched earlier in the run can
+make local tagging unnecessary. Steps after a failure are marked Not run.
+When local tagging adds tags, the metadata step merges those additions into
+existing CSVs without discarding post metadata or edited fields. Unresolved
+tag categories skip the affected image for the current run so incomplete
+metadata can be fixed and retried. Per-image conversion, tagging, metadata,
+captioning, and finalization failures are logged; remaining images continue.
+Skipped images stay in `images/`, and a new run retries them. The GUI reports
+the skipped count on completion. Missing required models, invalid setup, or
+other run-wide failures still stop the pipeline.
+
 ### Stopping and resuming
 
 Click **Stop** to interrupt a run. Completed assets remain in `done/`.
@@ -267,8 +280,8 @@ images in `images/`. Existing results and caches are reused where possible.
 
 To regenerate captions for a completed image, copy the image and its source
 `.txt` tags back into `images/`. Enable **Overwrite existing .long and .short
-files** to replace present caption files. Also enable **Regenerate cached
-captions** if you want fresh model output instead of a matching cached result.
+files** to replace present caption files. Also enable **Bypass refinement caption
+cache** if you want fresh model output instead of a matching cached result.
 
 After an interrupted save, `.finalize-*` folders in `done/` hold the recovery
 information needed by the next run. Removing them prevents automatic recovery.
@@ -429,7 +442,7 @@ To enable AnimeTimm, accept/request access on its model page, then run
 the approved account, or set `HF_TOKEN`. The token must allow access to the
 gated model. Network failures are reported separately from access denials.
 The Ollama server's GPU does not run this tagger. If you already have suitable
-tags, leave **Add high-confidence WD14 tags to existing tag files** off.
+tags, leave **Add missing tags to existing tag files** off.
 
 ### Images are skipped without captions
 

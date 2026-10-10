@@ -1,6 +1,7 @@
 """Generate Torii structured notes and long captions through Ollama."""
 
 from __future__ import annotations
+from image_failures import is_skipped, skip_image
 
 import hashlib
 import importlib.util
@@ -75,28 +76,37 @@ def restore_or_cache_parquet_outputs(
 ):
     candidates = {}
     for image in sorted(IMAGES_DIR.glob("*.*")):
-        if image.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        if is_skipped(image):
             continue
-        if image.stem.lower() in parquet_captions:
-            continue
-        if image.with_suffix(".toriiOutput").exists() or restore_cached_output(
-            image, cache_path
-        ):
-            continue
-        long_path = image.with_suffix(".long")
-        if long_path.exists() and long_path.read_text(encoding="utf-8-sig").strip():
-            continue
-        if not image.with_suffix(".csv").exists():
-            continue
-        candidates.setdefault(image.stem.lower(), []).append(image)
+        try:
+            if image.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                continue
+            if image.stem.lower() in parquet_captions:
+                continue
+            if image.with_suffix(".toriiOutput").exists() or restore_cached_output(
+                image, cache_path
+            ):
+                continue
+            long_path = image.with_suffix(".long")
+            if long_path.exists() and long_path.read_text(encoding="utf-8-sig").strip():
+                continue
+            if not image.with_suffix(".csv").exists():
+                continue
+            candidates.setdefault(image.stem.lower(), []).append(image)
+
+        except Exception as error:
+            skip_image(image, error)
 
     reports = load_parquet_torii_outputs(parquet_folder, set(candidates))
     restored = 0
     for stem, report in reports.items():
         for image in candidates[stem]:
-            image.with_suffix(".toriiOutput").write_text(report + "\n", encoding="utf-8")
-            cache_output(image, report, cache_path)
-            restored += 1
+            try:
+                image.with_suffix(".toriiOutput").write_text(report + "\n", encoding="utf-8")
+                cache_output(image, report, cache_path)
+                restored += 1
+            except Exception as error:
+                skip_image(image, error)
     return restored
 
 
@@ -106,22 +116,27 @@ def discover_images(prompt_builder, parquet_captions):
     prompts = {}
     skipped_missing_csv = []
     for image in sorted(IMAGES_DIR.glob("*.*")):
-        if image.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            continue
-        if image.stem.lower() in parquet_captions:
-            continue
-        result = image.with_suffix(".toriiOutput")
-        if result.exists() or restore_cached_output(image):
-            continue
-        long_path = image.with_suffix(".long")
-        if long_path.exists() and long_path.read_text(encoding="utf-8-sig").strip():
-            continue
-        if not image.with_suffix(".csv").exists():
-            skipped_missing_csv.append(image.name)
-            continue
-        built = prompt_builder.build_torii_prompts(image, explanations, fallback)
-        if built:
-            prompts[image] = built
+        try:
+            if is_skipped(image):
+                continue
+            if image.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                continue
+            if image.stem.lower() in parquet_captions:
+                continue
+            result = image.with_suffix(".toriiOutput")
+            if result.exists() or restore_cached_output(image):
+                continue
+            long_path = image.with_suffix(".long")
+            if long_path.exists() and long_path.read_text(encoding="utf-8-sig").strip():
+                continue
+            if not image.with_suffix(".csv").exists():
+                skipped_missing_csv.append(image.name)
+                continue
+            built = prompt_builder.build_torii_prompts(image, explanations, fallback)
+            if built:
+                prompts[image] = built
+        except Exception as error:
+            skip_image(image, error)
     return prompts, skipped_missing_csv
 
 
@@ -143,6 +158,7 @@ def process_image(client, image_path, model, prompts):
         cache_output(image_path, text)
         return True, structured_truncated or long_truncated
     except Exception as error:
+        skip_image(image_path, error)
         tqdm.write(f"Error generating Torii output for {image_path.name}: {error}")
         return False, False
 

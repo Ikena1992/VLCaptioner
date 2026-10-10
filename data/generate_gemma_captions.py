@@ -1,6 +1,7 @@
 """Generate final long and short captions with the configured Ollama model."""
 
 from __future__ import annotations
+from image_failures import is_skipped, skip_image
 
 import argparse
 import csv
@@ -178,35 +179,40 @@ def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=Fa
         ),
     )
     for image in images:
-        if image.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            continue
-        if not image.with_suffix(".csv").exists():
-            skipped["missing_csv"].append(image.name)
-            continue
-        short_path, long_path = image.with_suffix(".short"), image.with_suffix(".long")
-        complete = (
-            not overwrite_caption_files
-            and all(path.exists() and path.read_text(encoding="utf-8-sig").strip() for path in (short_path, long_path))
-        )
-        torii_path = image.with_suffix(".toriiOutput")
-        uses_parquet = image.stem.lower() in parquet_captions
-        torii_output = (
-            ""
-            if uses_parquet
-            else torii_path.read_text(encoding="utf-8-sig")
-            if torii_path.exists()
-            else ""
-        )
-        built = prompt_builder.build_gemma_prompts(image, explanations, fallback, torii_output)
-        if built:
-            if uses_parquet:
-                parquet_cache_prompts[image] = built["long"]
-            if not complete:
-                prompts[image] = built
-        elif not complete:
-            skipped["no_prompt"].append(image.name)
-        if complete:
-            skipped["complete"].append(image.name)
+        try:
+            if is_skipped(image):
+                continue
+            if image.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                continue
+            if not image.with_suffix(".csv").exists():
+                skipped["missing_csv"].append(image.name)
+                continue
+            short_path, long_path = image.with_suffix(".short"), image.with_suffix(".long")
+            complete = (
+                not overwrite_caption_files
+                and all(path.exists() and path.read_text(encoding="utf-8-sig").strip() for path in (short_path, long_path))
+            )
+            torii_path = image.with_suffix(".toriiOutput")
+            uses_parquet = image.stem.lower() in parquet_captions
+            torii_output = (
+                ""
+                if uses_parquet
+                else torii_path.read_text(encoding="utf-8-sig")
+                if torii_path.exists()
+                else ""
+            )
+            built = prompt_builder.build_gemma_prompts(image, explanations, fallback, torii_output)
+            if built:
+                if uses_parquet:
+                    parquet_cache_prompts[image] = built["long"]
+                if not complete:
+                    prompts[image] = built
+            elif not complete:
+                skipped["no_prompt"].append(image.name)
+            if complete:
+                skipped["complete"].append(image.name)
+        except Exception as error:
+            skip_image(image, error)
     return prompts, skipped, parquet_cache_prompts
 
 
@@ -220,19 +226,22 @@ def cache_parquet_long_captions(
     """Archive matching Parquet captions under the normal long-caption keys."""
     cached = 0
     for image_path, prompt in cache_prompts.items():
-        if not overwrite and get_cached_caption(
-            image_path, "long", model, prompt, cache_path
-        ):
-            continue
-        save_cached_caption(
-            image_path,
-            "long",
-            model,
-            prompt,
-            parquet_captions[image_path.stem.lower()],
-            cache_path,
-        )
-        cached += 1
+        try:
+            if not overwrite and get_cached_caption(
+                image_path, "long", model, prompt, cache_path
+            ):
+                continue
+            save_cached_caption(
+                image_path,
+                "long",
+                model,
+                prompt,
+                parquet_captions[image_path.stem.lower()],
+                cache_path,
+            )
+            cached += 1
+        except Exception as error:
+            skip_image(image_path, error)
     return cached
 
 
@@ -365,6 +374,32 @@ def build_image_finalizer(add_year_tag=False, add_copyright_tags=False):
     return finish
 
 
+def readable_duration(seconds):
+    seconds = max(0, round(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {seconds:02d}s"
+    return f"{seconds}s"
+
+
+def refinement_progress(processed, total, elapsed, skipped=0):
+    average = elapsed / processed if processed else 0
+    remaining = average * max(0, total - processed)
+    percent = 100 * processed / total if total else 100
+    message = (
+        f"Refining captions: {processed:,} of {total:,} images processed ({percent:.0f}%)"
+        f" | Elapsed: {readable_duration(elapsed)}"
+        f" | Estimated remaining: {readable_duration(remaining)}"
+        f" | Average: {average:.1f}s per image"
+    )
+    if skipped:
+        message += f" | Skipped: {skipped:,}"
+    return message
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -391,8 +426,6 @@ def main(argv=None):
     )
     client = OllamaClient(url, timeout)
     model = client.running_model() if configured_model.lower() == "auto" else configured_model
-    if configured_model.lower() != "auto":
-        client.ensure_model(model, tqdm.write)
     print(f"Ollama model: {model} ({url})\nBackend config: {config}")
     initialize_cache()
     finalizer.recover_publications()
@@ -416,25 +449,33 @@ def main(argv=None):
         overwrite=args.overwrite_caption_cache,
     )
     print(f"Cached {cached_parquet} matching Parquet long caption(s).")
-    completed_images = [IMAGES_DIR / name for name in skipped["complete"]]
+    prompts = {image: prompt for image, prompt in prompts.items() if not is_skipped(image)}
+    completed_images = [IMAGES_DIR / name for name in skipped["complete"] if not is_skipped(IMAGES_DIR / name)]
     if not prompts and not completed_images:
         print("No images to process.")
         print(f"Skipped without CSV metadata: {len(skipped['missing_csv'])}")
         print(f"Skipped without usable prompt: {len(skipped['no_prompt'])}")
         print(f"Skipped with existing result/cache: {len(skipped['complete'])}")
         return 0
+    failed_other = 0
     for image_path in tqdm(
         completed_images,
         desc="Finalizing completed captions",
         unit="image",
         dynamic_ncols=True,
     ):
-        finish_image(image_path)
+        try:
+            finish_image(image_path)
+        except Exception as error:
+            failed_other += 1
+            skip_image(image_path, error)
     failed_context = 0
     failed_repeat = 0
-    progress = tqdm(prompts, desc="Refinement (Ollama)", unit="image", dynamic_ncols=True, smoothing=0.1)
-    for index, image_path in enumerate(progress, start=1):
-        started = time.monotonic()
+    if prompts and configured_model.lower() != "auto":
+        client.ensure_model(model, tqdm.write)
+    refinement_started = time.monotonic()
+    print(f"Refining captions for {len(prompts):,} image(s)...", flush=True)
+    for index, image_path in enumerate(prompts, start=1):
         try:
             process_image(
                 client,
@@ -447,7 +488,8 @@ def main(argv=None):
                 args.overwrite_caption_files,
             )
             finish_image(image_path)
-        except RuntimeError as error:
+        except Exception as error:
+            skip_image(image_path, error)
             if is_token_repeat_error(error):
                 failed_repeat += 1
                 tqdm.write(f"Skipping {image_path.name}: repetition persisted after retry ({error})")
@@ -458,20 +500,15 @@ def main(argv=None):
                     f"OLLAMA_CONTEXT_SIZE={context_size} ({error})"
                 )
             else:
-                raise
-        status = (
-            f"request {index}/{len(prompts)}, "
-            f"{time.monotonic() - started:.1f}s/image"
-        )
-        if failed_context:
-            status += f", context-skipped {failed_context}"
-        if failed_repeat:
-            status += f", repetition-skipped {failed_repeat}"
-        progress.set_postfix_str(status, refresh=False)
-    if failed_context or failed_repeat:
-        raise SystemExit(
+                failed_other += 1
+        print(refinement_progress(
+            index, len(prompts), time.monotonic() - refinement_started,
+            failed_context + failed_repeat + failed_other,
+        ), flush=True)
+    if failed_context or failed_repeat or failed_other:
+        print(
             f"Refinement completed with {failed_context} context-size failure(s) "
-            f"and {failed_repeat} token-repetition failure(s). "
+            f"and {failed_repeat} token-repetition failure(s), plus {failed_other} other image failure(s). "
             "Retry the pipeline to process skipped images. For context-size "
             "failures, increase OLLAMA_CONTEXT_SIZE first."
         )
