@@ -166,7 +166,7 @@ def write_result(image_path, short_text, long_text, artist_names=None, preserve_
         image_path.with_suffix(".long").write_text(long_text + "\n", encoding="utf-8")
 
 
-def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=False, overwrite_caption_files=False):
+def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=False, overwrite_caption_files=False, prepare_tags=None):
     explanations = prompt_builder.load_character_explanations(prompt_builder.CHARACTER_DB)
     fallback = prompt_builder.load_wiki_explanations(prompt_builder.WIKI_CACHE_DB)
     prompts = {}
@@ -202,6 +202,8 @@ def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=Fa
                 if torii_path.exists()
                 else ""
             )
+            if prepare_tags is not None:
+                prepare_tags(image)
             built = prompt_builder.build_gemma_prompts(image, explanations, fallback, torii_output)
             if built:
                 if uses_parquet:
@@ -268,7 +270,7 @@ def generate_caption(
     cached = None
     if not overwrite_caption_cache:
         cached = get_cached_caption(image_path, kind, model, prompt, cache_path)
-    if cached:
+    if cached and normalize_caption_output(cached):
         return cached
     options = {
         "temperature": 0.0,
@@ -288,6 +290,8 @@ def generate_caption(
         text, _ = client.chat(model, prompt, image_path, {
             **options, "temperature": 0.3, "repeat_penalty": 1.2,
         })
+    if not normalize_caption_output(text):
+        raise RuntimeError(f"Generated {kind} caption was empty")
     save_cached_caption(image_path, kind, model, prompt, text, cache_path)
     return text
 
@@ -308,8 +312,6 @@ def process_image(
         if long_path.exists() and not overwrite_caption_files else ""
     )
     reuse_existing_long = bool(long_text)
-    if not long_text and not overwrite_caption_files:
-        image_path.with_suffix(".short").unlink(missing_ok=True)
     if not long_text:
         long_text = parquet_captions.get(image_path.stem.lower(), "")
     if not long_text:
@@ -323,6 +325,8 @@ def process_image(
             context_size=context_size,
         )
     long_text = normalize_caption_output(long_text)
+    if not long_text:
+        raise RuntimeError("Long caption was empty after normalization")
     if not reuse_existing_long and not overwrite_caption_files:
         long_path.write_text(long_text + "\n", encoding="utf-8")
     short_text = generate_caption(
@@ -355,7 +359,11 @@ def build_image_finalizer(add_year_tag=False, add_copyright_tags=False):
     )
     dropout_protected_tags.discard("")
 
-    def finish(image_path):
+    prepared = set()
+
+    def prepare_tags(image_path):
+        if image_path in prepared:
+            return
         csv_path = image_path.with_suffix(".csv")
         if not tag_files.process_csv(
             csv_path,
@@ -367,11 +375,16 @@ def build_image_finalizer(add_year_tag=False, add_copyright_tags=False):
             add_copyright_tags=add_copyright_tags,
         ):
             raise RuntimeError(f"Could not create tag file for {image_path.name}")
+        prepared.add(image_path)
+
+    def finish(image_path):
+        prepare_tags(image_path)
         if not finalizer.process_caption_pair(
             image_path.with_suffix(".short"), report_success=False
         ):
             raise RuntimeError(f"Could not finalize {image_path.name}")
 
+    finish.prepare_tags = prepare_tags
     return finish
 
 
@@ -419,7 +432,7 @@ def main(argv=None):
     parquet = load_parquet_captions(SCRIPT_DIR / "parquet", local_stems)
     prompts, skipped, parquet_cache_prompts = discover_images(
         load_prompt_builder(), parquet, args.overwrite_caption_cache,
-        args.overwrite_caption_files,
+        args.overwrite_caption_files, prepare_tags=finish_image.prepare_tags,
     )
     cached_parquet = cache_parquet_long_captions(
         parquet,

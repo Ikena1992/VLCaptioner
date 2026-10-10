@@ -673,7 +673,9 @@ def build_gemma_prompts(
     char_explanations_fallback: dict[str, str],
     torii_output: str,
 ) -> dict[str, str] | None:
-    tag_file = image_path.with_suffix(".txt")
+    tag_file = image_path.with_suffix(".tag")
+    if not tag_file.exists():
+        tag_file = image_path.with_suffix(".txt")
 
     torii_content = sanitize_torii_output(torii_output)
 
@@ -681,9 +683,17 @@ def build_gemma_prompts(
     if tag_file.exists():
         raw_tags = [
             t.strip()
-            for t in read_source_tags(tag_file.read_text(encoding="utf-8")).split(",")
+            for t in (
+                tag_file.read_text(encoding="utf-8-sig")
+                if tag_file.suffix == ".tag"
+                else read_source_tags(tag_file.read_text(encoding="utf-8-sig"))
+            ).split(",")
             if t.strip()
         ]
+
+    # Training tags are shuffled; prompt order must stay stable for cache reuse.
+    if tag_file.suffix == ".tag":
+        raw_tags.sort(key=str.casefold)
 
     if not raw_tags and not torii_content:
         return None

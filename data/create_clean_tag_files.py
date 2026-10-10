@@ -32,15 +32,12 @@ from year_tags import get_year_tag
 import csv
 import os
 import random
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
 from clean_general_tags import (
-    CONDITIONAL_LOG_FILE,
-    DEBUG_CONDITIONAL_RULES,
-    CONDITIONAL_LOG_FILE,
-    DEBUG_CONDITIONAL_RULES,
     CONDITIONAL_LOG_FILE,
     DEBUG_CONDITIONAL_RULES,
     DROPOUT_ENABLED,
@@ -508,11 +505,21 @@ def process_csv(
         add_copyright_tags=add_copyright_tags,
     )
 
+    temporary_path = None
     try:
-        output_path.write_text(", ".join(final_tags), encoding="utf-8")
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=output_path.parent,
+            prefix=f".{output_path.name}.", suffix=".tmp", delete=False,
+        ) as output:
+            temporary_path = Path(output.name)
+            output.write(", ".join(final_tags))
+        temporary_path.replace(output_path)
     except Exception as exc:
         print(f"ERROR writing {output_path}: {exc}")
         return False
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
     if report_success:
         print(f"WROTE {output_path.name} ({len(final_tags)} tags)")
@@ -538,12 +545,6 @@ def main() -> None:
     dropout_rate = DROPOUT_RATE if DROPOUT_ENABLED else 0.0
     if not 0.0 <= dropout_rate <= 1.0:
         raise SystemExit("DROPOUT_RATE must be between 0.0 and 1.0")
-    dropout_rate = DROPOUT_RATE if DROPOUT_ENABLED else 0.0
-    if not 0.0 <= dropout_rate <= 1.0:
-        raise SystemExit("DROPOUT_RATE must be between 0.0 and 1.0")
-    dropout_rate = DROPOUT_RATE if DROPOUT_ENABLED else 0.0
-    if not 0.0 <= dropout_rate <= 1.0:
-        raise SystemExit("DROPOUT_RATE must be between 0.0 and 1.0")
     dropout_protected_tags = {
         normalize_clean_tag(tag) for tag in JAVA_100_DROPOUT_PROTECT_TAGS
     }
@@ -551,12 +552,6 @@ def main() -> None:
         normalize_clean_tag(tag) for tag in EXTRA_DROPOUT_PROTECT_TAGS
     )
     dropout_protected_tags.discard("")
-
-    if DEBUG_CONDITIONAL_RULES:
-        (folder / CONDITIONAL_LOG_FILE).write_text("", encoding="utf-8")
-
-    if DEBUG_CONDITIONAL_RULES:
-        (folder / CONDITIONAL_LOG_FILE).write_text("", encoding="utf-8")
 
     if DEBUG_CONDITIONAL_RULES:
         (folder / CONDITIONAL_LOG_FILE).write_text("", encoding="utf-8")
