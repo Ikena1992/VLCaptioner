@@ -20,6 +20,7 @@ from cache_seed import ensure_runtime_cache
 from parquet_captions import load_parquet_captions
 from runtime_config import load_positive_int, load_setting
 from tqdm import tqdm
+from caption_progress import caption_progress
 
 import create_clean_tag_files as tag_files
 import finalize_caption_dataset as finalizer
@@ -374,30 +375,8 @@ def build_image_finalizer(add_year_tag=False, add_copyright_tags=False):
     return finish
 
 
-def readable_duration(seconds):
-    seconds = max(0, round(seconds))
-    hours, remainder = divmod(seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    if hours:
-        return f"{hours}h {minutes:02d}m"
-    if minutes:
-        return f"{minutes}m {seconds:02d}s"
-    return f"{seconds}s"
-
-
 def refinement_progress(processed, total, elapsed, skipped=0):
-    average = elapsed / processed if processed else 0
-    remaining = average * max(0, total - processed)
-    percent = 100 * processed / total if total else 100
-    message = (
-        f"Refining captions: {processed:,} of {total:,} images processed ({percent:.0f}%)"
-        f" | Elapsed: {readable_duration(elapsed)}"
-        f" | Estimated remaining: {readable_duration(remaining)}"
-        f" | Average: {average:.1f}s per image"
-    )
-    if skipped:
-        message += f" | Skipped: {skipped:,}"
-    return message
+    return caption_progress("Refining captions", processed, total, elapsed, skipped)
 
 
 def main(argv=None):

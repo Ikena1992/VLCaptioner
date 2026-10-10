@@ -18,6 +18,7 @@ from parquet_captions import load_parquet_captions
 from parquet_torii_outputs import load_parquet_torii_outputs
 from runtime_config import load_positive_int, load_setting
 from tqdm import tqdm
+from caption_progress import caption_progress
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 IMAGES_DIR = (SCRIPT_DIR / ".." / "images").resolve()
@@ -188,18 +189,14 @@ def main():
     client = OllamaClient(url, timeout)
     client.ensure_model(model, tqdm.write)
     failed = truncated = 0
-    progress = tqdm(prompts, desc="Torii (Ollama)", unit="image", dynamic_ncols=True, smoothing=0.1)
-    for index, image_path in enumerate(progress, start=1):
-        started = time.monotonic()
+    started = time.monotonic()
+    print(f"Generating Torii captions for {len(prompts):,} image(s)...", flush=True)
+    for index, image_path in enumerate(prompts, start=1):
         succeeded, was_truncated = process_image(client, image_path, model, prompts)
         failed += not succeeded
         truncated += was_truncated
-        status = f"request {index}/{len(prompts)}, {time.monotonic() - started:.1f}s/image"
-        if failed:
-            status += f", failed {failed}"
-        if truncated:
-            status += f", truncated {truncated}"
-        progress.set_postfix_str(status, refresh=False)
+        print(caption_progress("Torii captions", index, len(prompts),
+                               time.monotonic() - started, failed, truncated), flush=True)
     if failed:
         print(
             f"Torii failed for {failed} image(s). "

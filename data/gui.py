@@ -423,7 +423,7 @@ class PipelineGUI:
                     self.refresh_setup()
                 else:
                     self.append(event)
-                    match = re.search(r"Refining captions: ([\d,]+) of ([\d,]+) images processed", event)
+                    match = re.search(r"(?:Refining captions|Torii captions): ([\d,]+) of ([\d,]+) images processed", event)
                     if match:
                         processed, total = (int(value.replace(",", "")) for value in match.groups())
                         self.progress.set(event.strip())
