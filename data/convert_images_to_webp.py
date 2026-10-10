@@ -1,3 +1,4 @@
+from runtime_config import pipeline_images
 import os
 import tempfile
 from image_failures import is_skipped, skip_image
@@ -5,11 +6,11 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from tqdm import tqdm
 
 # Folder named 'images' one level above this script
-folder_path = os.path.join(os.path.dirname(__file__), "..", "images")
+folder_path = pipeline_images().as_posix()
 folder_path = os.path.abspath(folder_path)
 
 # Supported image extensions
-image_extensions = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".gif")
+image_extensions = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".avif", ".gif")
 jpeg_extensions = (".jpg", ".jpeg")
 
 

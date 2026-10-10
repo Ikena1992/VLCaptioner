@@ -1,3 +1,4 @@
+from runtime_config import pipeline_images
 from quality_tags import get_quality_tag, normalize_quality_tag
 import os
 import csv
@@ -15,7 +16,7 @@ from image_failures import is_skipped, skip_image
 
 # ---------------- CONFIG ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))  # script location
-IMAGE_FOLDER = os.path.join(SCRIPT_DIR, "..", "images")  # one level above
+IMAGE_FOLDER = pipeline_images().as_posix()
 IMAGE_FOLDER = os.path.abspath(IMAGE_FOLDER)
 os.makedirs(IMAGE_FOLDER, exist_ok=True)
 

@@ -1,3 +1,4 @@
+from runtime_config import pipeline_images
 from source_tag_file import MARKER, read_source_tags, has_source_tags
 import argparse
 import sys
@@ -29,7 +30,7 @@ CHARACTER_THRESHOLD_FALLBACK = 0.51
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-IMAGE_FOLDER = SCRIPT_DIR / ".." / "images"  # one level above
+IMAGE_FOLDER = pipeline_images()
 IMAGE_FOLDER = IMAGE_FOLDER.resolve()
 
 model_cache_dir = SCRIPT_DIR / "models/convnextv2_huge.dbv4-full"

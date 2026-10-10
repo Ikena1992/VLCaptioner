@@ -1,8 +1,9 @@
+from runtime_config import pipeline_images
 from pathlib import Path
 from tqdm import tqdm
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-IMAGES_DIR = (SCRIPT_DIR / ".." / "images").resolve()
+IMAGES_DIR = pipeline_images()
 
 # Phrases to replace
 replacements = {

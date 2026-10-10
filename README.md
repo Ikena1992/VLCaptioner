@@ -351,6 +351,29 @@ without moving files.
 
 ### Image downloader
 
+Download and Copy / move are owned windows of the captioning GUI. Opening either
+tool again brings its existing window forward. Closing the captioning GUI stops
+active work and waits for its tool windows to close. Launching a tool directly
+also opens its owning captioning GUI.
+Copy / move waits until downloads and captioning finish. Manual captioning also
+waits for downloads to finish; automatic batch captioning can run alongside them.
+
+To download and caption simultaneously, keep the captioning GUI open and choose
+its caption options. In the downloader, enable **Caption automatically** and set
+**Images per batch** (default: 50). Completed downloads appear in the captioning
+GUI's **Queue** tab. Each batch runs through all steps while downloads continue.
+The final smaller batch is queued when downloads finish or stop.
+
+Settings and detailed progress stay in the captioning GUI. Settings are captured
+when each batch starts and retained for retries. **Pause queue** lets the active
+batch finish; **Stop** stops the active captioning batch. Use **Retry selected**
+and **Resume queue** for stopped or failed batches. Cancelling a waiting batch
+keeps its files. Queued requests survive closing the GUIs; interrupted active
+batches appear as stopped when the captioning GUI reopens.
+If the downloader exits unexpectedly, its completed images are recovered as a
+stopped batch in Queue. Select that batch and retry it; partial downloads are
+excluded. Queued captioning waits until the captioning setup check succeeds.
+
 Start the captioning GUI with `GUI.cmd` on Windows or `bash GUI.sh` on Linux,
 then select **Open image downloader** in **2. Download images (optional)**.
 The downloader opens in a separate window with no viewer and does not require

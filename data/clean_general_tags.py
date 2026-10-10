@@ -12,6 +12,8 @@ This is a stripped-down Python rewrite of the uploaded Java ActionHandler:
 
 from __future__ import annotations
 
+from runtime_config import pipeline_images
+
 import os
 import random
 from pathlib import Path
@@ -19,7 +21,7 @@ from typing import Iterable
 
 # ---------------- CONFIG ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-IMAGE_FOLDER = os.path.join(SCRIPT_DIR, "..", "images")
+IMAGE_FOLDER = pipeline_images().as_posix()
 IMAGE_FOLDER = os.path.abspath(IMAGE_FOLDER)
 
 # ---------------- CONDITIONAL RULE CONFIG ----------------

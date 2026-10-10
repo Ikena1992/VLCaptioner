@@ -1,8 +1,14 @@
 from pathlib import Path
+import os
 
 
 PROJECT_DIR = Path(__file__).parent.parent.resolve()
 CONFIG_FILE = PROJECT_DIR / "config.txt"
+
+
+def pipeline_images():
+    """Allow a worker to process an isolated download batch."""
+    return Path(os.environ.get("VLCAPTIONER_IMAGES", str(PROJECT_DIR / "images"))).resolve()
 
 
 def read_settings(path):

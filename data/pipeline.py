@@ -67,7 +67,7 @@ def stage_skip_reason(stage, image_folder, overwrite_danbooru_txt=False,
     images = [p for p in image_folder.iterdir() if p.is_file() and p.suffix.lower()
               in {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".gif", ".webp", ".avif"}]
     if stage.script == "convert_images_to_webp.py":
-        if not any(p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".gif"} for p in images):
+        if not any(p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".avif", ".gif"} for p in images):
             return "No images need WebP conversion"
     elif stage.script == "fetch_danbooru_tags.py":
         if not any(re.fullmatch(r"[0-9a-fA-F]{32}", p.stem) and

@@ -7,6 +7,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import ttkbootstrap as ttk
+import caption_queue
 
 IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.avif', '.tif', '.tiff')
 SIDECAR_EXTENSIONS = ('.txt', '.combined', '.long', '.short', '.tag', '.naturallanguage')
@@ -96,8 +97,10 @@ def transfer(settings, cancel, emit):
 
 
 class CopyMoveApp:
-    def __init__(self, root):
+    def __init__(self, root, can_start=None):
         self.root = root
+        self.can_start = can_start or (lambda: True)
+        self.activity_handles = []
         self.events = queue.Queue()
         self.cancel = threading.Event()
         self.running = False
@@ -105,6 +108,7 @@ class CopyMoveApp:
         self.gif_frames = []
         self.gif_index = 0
         self.gif_job = None
+        self.poll_job = None
         self.controls = []
         root.title('Copy / move images by tags')
         root.geometry('880x760')
@@ -163,7 +167,7 @@ class CopyMoveApp:
         self.log = tk.Text(panel, height=7, wrap='word', state='disabled', background='#20252b', foreground='#eeeeee', relief='flat')
         self.log.pack(fill='both', expand=True, pady=(10, 0))
         self.load_gif()
-        root.after(50, self.poll)
+        self.poll_job = root.after(50, self.poll)
 
     def browse(self, variable):
         folder = filedialog.askdirectory(parent=self.root, initialdir=variable.get() or None)
@@ -171,7 +175,10 @@ class CopyMoveApp:
             variable.set(folder)
 
     def start(self, action):
-        if self.running:
+        if self.running or self.closing:
+            return
+        if not self.can_start():
+            self.status.configure(text='Wait for captioning or downloads to finish before copying or moving files.')
             return
         try:
             if not self.source.get().strip() or not self.destination.get().strip():
@@ -194,6 +201,18 @@ class CopyMoveApp:
         except (ValueError, OSError) as error:
             messagebox.showerror('Cannot start transfer', str(error), parent=self.root)
             return
+        try:
+            for acquire in (caption_queue.worker_lock, caption_queue.downloader_lock):
+                handle = acquire()
+                if handle is None:
+                    self.release_activity()
+                    self.status.configure(text='Captioning, downloading, or another transfer is active. Try again when it finishes.')
+                    return
+                self.activity_handles.append(handle)
+        except OSError as error:
+            self.release_activity()
+            self.status.configure(text=f'Could not reserve the file operation: {error}')
+            return
         self.running = True
         self.cancel.clear()
         for control in self.controls:
@@ -202,7 +221,21 @@ class CopyMoveApp:
         self.progress.configure(value=0)
         self.status.configure(text='Starting transfer…')
         self.animate_gif()
-        threading.Thread(target=transfer, args=(settings, self.cancel, self.events.put), daemon=True).start()
+        try:
+            threading.Thread(target=transfer, args=(settings, self.cancel, self.events.put), daemon=True).start()
+        except RuntimeError:
+            self.running = False
+            self.release_activity()
+            self.stop_gif()
+            for control in self.controls:
+                control.configure(state='normal')
+            self.cancel_button.configure(state='disabled')
+            self.status.configure(text='Could not start the transfer worker. Try again.')
+
+    def release_activity(self):
+        for handle in reversed(self.activity_handles):
+            handle.close()
+        self.activity_handles.clear()
 
     def request_cancel(self):
         self.cancel.set()
@@ -210,6 +243,7 @@ class CopyMoveApp:
         self.status.configure(text='Cancelling after the current image and its companion files…')
 
     def poll(self):
+        self.poll_job = None
         for _ in range(100):
             try:
                 event = self.events.get_nowait()
@@ -230,15 +264,16 @@ class CopyMoveApp:
             elif event[0] == 'done':
                 _, cancelled, scanned, matched, transferred, skipped, errors = event
                 self.running = False
+                self.release_activity()
                 self.stop_gif()
                 for control in self.controls:
                     control.configure(state='normal')
                 self.cancel_button.configure(state='disabled')
                 self.status.configure(text=f'{"Cancelled" if cancelled else "Finished"}: {scanned:,} captions checked, {matched:,} matched, {transferred:,} files transferred, {skipped:,} groups skipped, {errors:,} errors.')
                 if self.closing:
-                    self.root.destroy()
+                    self.destroy_window()
                     return
-        self.root.after(50, self.poll)
+        self.poll_job = self.root.after(50, self.poll)
 
     def load_gif(self):
         if not GIF_PATH.exists():
@@ -269,14 +304,22 @@ class CopyMoveApp:
             self.gif_label.configure(image=self.gif_frames[0])
 
     def close(self):
+        if self.closing:
+            return
+        self.closing = True
         if self.running:
-            self.closing = True
             self.request_cancel()
         else:
-            self.root.destroy()
+            self.destroy_window()
+
+    def destroy_window(self):
+        self.stop_gif()
+        if self.poll_job is not None:
+            self.root.after_cancel(self.poll_job)
+            self.poll_job = None
+        self.root.destroy()
 
 
 if __name__ == '__main__':
-    app_root = ttk.Window(themename='bootstrap-dark')
-    CopyMoveApp(app_root)
-    app_root.mainloop()
+    from gui import main
+    main(initial_tool="move")

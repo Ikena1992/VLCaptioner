@@ -26,6 +26,8 @@ Important:
 
 from __future__ import annotations
 
+from runtime_config import pipeline_images
+
 from quality_tags import get_quality_tag, normalize_quality_tag
 from year_tags import get_year_tag
 
@@ -54,7 +56,7 @@ from clean_general_tags import (
 
 # ---------------- CONFIG ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-IMAGE_FOLDER = os.path.join(SCRIPT_DIR, "..", "images")
+IMAGE_FOLDER = pipeline_images().as_posix()
 IMAGE_FOLDER = os.path.abspath(IMAGE_FOLDER)
 
 RECURSIVE = False

@@ -1,3 +1,4 @@
+from runtime_config import pipeline_images
 import os
 import csv
 import tempfile
@@ -13,7 +14,7 @@ from source_tag_file import read_source_tags, read_source_metadata
 
 # Paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-INPUT_FOLDER = os.path.join(SCRIPT_DIR, "..", "images")
+INPUT_FOLDER = pipeline_images().as_posix()
 INPUT_FOLDER = os.path.abspath(INPUT_FOLDER)
 
 CACHE_FOLDER = os.path.join(SCRIPT_DIR, "caches")

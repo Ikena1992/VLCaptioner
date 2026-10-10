@@ -1,3 +1,4 @@
+from runtime_config import pipeline_images
 from source_tag_file import read_source_tags
 import os
 import re
@@ -18,7 +19,7 @@ from cache_seed import ensure_runtime_cache
 # CONFIG
 # -------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-INPUT_FOLDER = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "images"))
+INPUT_FOLDER = pipeline_images().as_posix()
 
 CACHE_FOLDER = os.path.join(SCRIPT_DIR, "caches")
 os.makedirs(CACHE_FOLDER, exist_ok=True)

@@ -1,6 +1,8 @@
 """Generate final long and short captions with the configured Ollama model."""
 
 from __future__ import annotations
+
+from runtime_config import pipeline_images
 from image_failures import is_skipped, skip_image
 
 import argparse
@@ -26,7 +28,7 @@ import create_clean_tag_files as tag_files
 import finalize_caption_dataset as finalizer
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-IMAGES_DIR = (SCRIPT_DIR / ".." / "images").resolve()
+IMAGES_DIR = pipeline_images()
 CAPTION_CACHE = SCRIPT_DIR / "caches" / "captionResultsCache.sqlite3"
 CAPTION_MAX_NEW_TOKENS = {"short": 384, "long": 1536}
 DEFAULT_CAPTION_CONTEXT_SIZE = 65536

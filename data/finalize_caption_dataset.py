@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from runtime_config import pipeline_images
+
 import json
 import re
 import shutil
@@ -13,7 +15,7 @@ from check_caption_quality import quality_issues
 
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-IMAGES_DIR = (SCRIPT_DIR / ".." / "images").resolve()
+IMAGES_DIR = pipeline_images()
 DONE_DIR = (SCRIPT_DIR / ".." / "done").resolve()
 REVIEW_DIR = (SCRIPT_DIR / ".." / "captionReview").resolve()
 DONE_DIR.mkdir(parents=True, exist_ok=True)

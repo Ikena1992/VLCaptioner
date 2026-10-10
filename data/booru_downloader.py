@@ -230,7 +230,8 @@ def save_original(post, source, images, done, known, cancel, log=lambda message:
             temporary.unlink(missing_ok=True)
 
 
-def run_job(job, images, done, known, cancel, report, log=lambda message: None):
+def run_job(job, images, done, known, cancel, report, log=lambda message: None,
+            on_download=None, destination=None):
     if job.source not in ("Danbooru", "Gelbooru") or job.limit < 1 or not job.tags.strip():
         raise ValueError("Tags and a positive post limit are required")
     images.mkdir(parents=True, exist_ok=True)
@@ -265,12 +266,19 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None):
                     post_log("Skipped: blacklist matched " + ", ".join(matches))
                     result = "blacklisted"
                 else:
-                    result = save_original(post, job.source, images, done, known, cancel, post_log)
+                    target_folder = destination() if destination else images
+                    result = save_original(post, job.source, target_folder, done, known, cancel, post_log)
                 if result == "cancelled":
                     break
                 counts[result] += 1
             except (requests.RequestException, OSError, RuntimeError, ValueError):
                 counts["failed"] += 1
+                report(examined, counts.copy())
+                continue
+            # Submission failures must stop the row, not count a saved image as
+            # both downloaded and failed or keep filling a broken batch.
+            if result == "downloaded" and on_download:
+                on_download(target_folder)
             report(examined, counts.copy())
         if not fresh:
             log("Stopped: site returned only posts already checked in this search.")

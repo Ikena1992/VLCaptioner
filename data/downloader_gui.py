@@ -11,22 +11,26 @@ import ttkbootstrap as ttk
 
 from booru_downloader import DownloadJob, ImageIndex, failure_reason, parse_blacklist, run_job
 from runtime_config import PROJECT_DIR
+import caption_queue
 
 SETTINGS_FILE = PROJECT_DIR / "data" / "caches" / "downloader_settings.json"
 
 
 class DownloaderGUI:
-    def __init__(self, root, settings_file=SETTINGS_FILE):
+    def __init__(self, root, settings_file=SETTINGS_FILE, can_start=None):
         self.root = root
         self.settings_file = settings_file
+        self.can_start = can_start or (lambda automatic: True)
         self.rows = []
         self.events = queue.Queue()
         self.cancel = threading.Event()
         self.running = False
         self.closing = False
+        self.poll_job = None
+        self.close_job = None
         root.title("VLCaptioner — Image downloader")
-        root.geometry("880x720")
-        root.minsize(760, 700)
+        root.geometry("880x860")
+        root.minsize(760, 840)
         frame = ttk.Frame(root, padding=16)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text="Download original images", font=("Segoe UI", 18, "bold")).pack(anchor="w")
@@ -49,6 +53,21 @@ class DownloaderGUI:
         for column, label in enumerate(("Source", "Search tags", "Post limit", "")):
             ttk.Label(self.table, text=label).grid(row=0, column=column, sticky="w", padx=4)
         self.table.columnconfigure(1, weight=1)
+        batching = ttk.Frame(frame)
+        batching.pack(fill="x", pady=8)
+        self.auto_caption = tk.BooleanVar(value=False)
+        self.batch_size = tk.StringVar(value="50")
+        self.caption_toggle = ttk.Checkbutton(batching, text="Caption automatically", variable=self.auto_caption, command=self.update_batch_controls)
+        self.caption_toggle.pack(side="left")
+        ttk.Label(batching, text="Images per batch").pack(side="left", padx=(18, 6))
+        self.batch_entry = ttk.Entry(batching, textvariable=self.batch_size, width=7, state="disabled")
+        self.batch_entry.pack(side="left")
+        ttk.Label(frame, text="Caption automatically: caption downloaded images in batches while downloads continue.",
+                  wraplength=720, justify="left").pack(anchor="w")
+        ttk.Label(frame, text="Batch size: larger = fewer model switches; smaller = earlier results. Leftover images form the last batch.",
+                  wraplength=720, justify="left").pack(anchor="w", pady=(4, 4))
+        ttk.Label(frame, text="Keep the Caption GUI open. Settings: Options tab. Batch progress: Queue tab.",
+                  wraplength=720, justify="left").pack(anchor="w")
         controls = ttk.Frame(frame)
         controls.pack(fill="x", pady=8)
         self.add_button = ttk.Button(controls, text="Add row", command=self.add_row)
@@ -64,12 +83,18 @@ class DownloaderGUI:
         ttk.Label(frame, text="Rows and blacklist are remembered on close. Reopening restores settings; downloads start only when you click Start downloads.",
                   wraplength=720, justify="left").pack(anchor="w", pady=(8, 0))
         self.restore_settings()
+        self.update_batch_controls()
         root.protocol("WM_DELETE_WINDOW", self.close)
-        root.after(100, self.poll)
+        self.poll_job = root.after(100, self.poll)
+
+    def update_batch_controls(self):
+        self.batch_entry.configure(state="normal" if self.auto_caption.get() and not self.running else "disabled")
 
     def restore_settings(self):
         try:
             settings = json.loads(self.settings_file.read_text(encoding="utf-8"))
+            if not isinstance(settings, dict) or not isinstance(settings.get("auto_caption", False), bool):
+                raise ValueError()
             rows = settings["rows"]
             blacklist = settings["blacklist"]
             if not isinstance(blacklist, str) or not isinstance(rows, list):
@@ -87,12 +112,14 @@ class DownloaderGUI:
             return
         if settings.get("blacklist_separator") != "spaces":
             blacklist = " ".join(blacklist.replace(",", " ").split())
+        self.auto_caption.set(bool(settings.get("auto_caption", False)))
+        self.batch_size.set(str(settings.get("batch_size", "50")))
         self.blacklist.set(blacklist)
         for row in rows:
             self.add_row(row["source"], row["tags"], row["limit"])
 
     def save_settings(self):
-        settings = {"blacklist_separator": "spaces", "blacklist": self.blacklist.get(), "rows": [
+        settings = {"auto_caption": self.auto_caption.get(), "batch_size": self.batch_size.get(), "blacklist_separator": "spaces", "blacklist": self.blacklist.get(), "rows": [
             {"source": source.get(), "tags": tags.get(), "limit": limit.get()}
             for source, tags, limit, _ in self.rows]}
         temporary = None
@@ -107,7 +134,10 @@ class DownloaderGUI:
             messagebox.showwarning("Image downloader", "Could not save downloader settings. Check folder permissions.", parent=self.root)
         finally:
             if temporary is not None:
-                temporary.unlink(missing_ok=True)
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass  # Cleanup failure must not prevent the window closing.
 
     def add_row(self, source_value="Danbooru", tags_value="", limit_value="100"):
         source = tk.StringVar(value=source_value)
@@ -135,16 +165,26 @@ class DownloaderGUI:
     def start(self):
         if self.running or self.closing:
             return
+        if not self.can_start(self.auto_caption.get()):
+            self.status.set("Wait for captioning or copy / move to finish before downloading.")
+            return
         try:
+            size = int(self.batch_size.get()) if self.auto_caption.get() else 50
+            if size < 1:
+                raise ValueError()
             blacklist = parse_blacklist(self.blacklist.get())
             jobs = [DownloadJob(source.get(), tags.get().strip(), int(limit.get()), blacklist)
                     for source, tags, limit, _ in self.rows]
             if not jobs or any(not job.tags or job.limit < 1 for job in jobs):
                 raise ValueError()
         except ValueError:
-            messagebox.showerror("Image downloader", "Enter tags and a positive whole-number post limit for every row.")
+            messagebox.showerror("Image downloader", "Enter tags and positive whole-number post limits and batch size.")
             return
         self.save_settings()
+        self.caption_batches = self.auto_caption.get()
+        self.chunk_size = size
+        self.caption_toggle.configure(state="disabled")
+        self.batch_entry.configure(state="disabled")
         self.running = True
         self.blacklist_entry.configure(state="disabled")
         self.cancel.clear()
@@ -155,15 +195,52 @@ class DownloaderGUI:
             for widget in widgets:
                 widget.configure(state="disabled")
         self.status.set("Downloading…")
-        threading.Thread(target=self.work, args=(jobs,), daemon=True).start()
+        try:
+            threading.Thread(target=self.work, args=(jobs,), daemon=True).start()
+        except RuntimeError:
+            self.events.put(("log", "Could not start the download worker. Try again."))
+            self.events.put(("finished", "Could not start downloads"))
 
     def work(self, jobs):
         had_errors = False
+        batch_id = None
+        batch_count = 0
+        batch_handle = None
+        download_handle = None
         try:
+            download_handle = caption_queue.downloader_lock()
+            if download_handle is None:
+                had_errors = True
+                self.events.put(("log", "Another downloader is already running. Wait for it to finish, then start again."))
+                return
             images, done = PROJECT_DIR / "images", PROJECT_DIR / "done"
             self.events.put(("log", "Scanning images/ and done/ for existing MD5 filenames…"))
             known = ImageIndex(images, done)
             self.events.put(("log", f"Found {len(known)} existing MD5 images in images/ and done/."))
+            def received(path):
+                nonlocal batch_id, batch_count, batch_handle
+                batch_count += 1
+                try:
+                    caption_queue.update(batch_id, "Downloading", batch_count)
+                    if batch_count >= self.chunk_size:
+                        caption_queue.update(batch_id, "Waiting", batch_count)
+                except (OSError, caption_queue.sqlite3.Error) as error:
+                    raise caption_queue.QueueSubmissionError() from error
+                if batch_count >= self.chunk_size:
+                    batch_handle.close()
+                    batch_handle = None
+                    batch_id = None
+                    batch_count = 0
+
+            def destination():
+                nonlocal batch_id, images, batch_handle
+                if batch_id is None:
+                    try:
+                        batch_id, images, batch_handle = caption_queue.new_batch("Downloaded images", own_download=True)
+                    except (OSError, caption_queue.sqlite3.Error) as error:
+                        raise caption_queue.QueueSubmissionError() from error
+                return images
+
             for index, job in enumerate(jobs, 1):
                 if self.cancel.is_set():
                     break
@@ -171,17 +248,34 @@ class DownloaderGUI:
                 try:
                     counts = run_job(job, images, done, known, self.cancel,
                                      lambda count, stats: self.events.put(("status", f"Row {index}: {count}/{job.limit} checked; {stats['downloaded']} downloaded")),
-                                     log=lambda message: self.events.put(("log", f"Row {index}: {message}")))
+                                     log=lambda message: self.events.put(("log", f"Row {index}: {message}")),
+                                     on_download=received if self.caption_batches else None,
+                                     destination=destination if self.caption_batches else None)
                     self.events.put(("log", f"Row {index}: " + ", ".join(f"{value} {key}" for key, value in counts.items())))
                     had_errors = had_errors or bool(counts["failed"])
                 except Exception as error:
                     had_errors = True
+                    if isinstance(error, caption_queue.QueueSubmissionError):
+                        self.events.put(("log", "Downloads stopped because the caption queue could not be saved. "
+                                         "Check disk space and folder permissions before starting again."))
+                        break
                     # Network errors may include authenticated URLs. Never log them.
                     self.events.put(("log", f"Row {index} failed: {failure_reason(error)}"))
         except Exception:
             had_errors = True
             self.events.put(("log", "Could not scan image folders. Check folder permissions."))
         finally:
+            try:
+                if batch_id is not None:
+                    caption_queue.update(batch_id, "Waiting" if batch_count else "Cancelled", batch_count)
+            except (OSError, caption_queue.sqlite3.Error):
+                had_errors = True
+                self.events.put(("log", "Could not submit the final batch. Reopen the Caption GUI to recover its files."))
+            finally:
+                if batch_handle:
+                    batch_handle.close()
+                if download_handle:
+                    download_handle.close()
             self.events.put(("finished", "Stopped" if self.cancel.is_set() else
                              "Finished with errors — see log" if had_errors else "Finished"))
 
@@ -191,6 +285,7 @@ class DownloaderGUI:
         self.stop_button.configure(state="disabled")
 
     def poll(self):
+        self.poll_job = None
         try:
             # Bound each batch so log traffic cannot starve Stop or window events.
             for _ in range(200):
@@ -209,6 +304,8 @@ class DownloaderGUI:
                     self.running = False
                     if self.closing:
                         continue
+                    self.caption_toggle.configure(state="normal")
+                    self.update_batch_controls()
                     self.blacklist_entry.configure(state="normal")
                     self.add_button.configure(state="normal")
                     self.start_button.configure(state="normal")
@@ -218,7 +315,7 @@ class DownloaderGUI:
                             widget.configure(state="readonly" if index == 0 else "normal")
         except queue.Empty:
             pass
-        self.root.after(25 if not self.events.empty() else 100, self.poll)
+        self.poll_job = self.root.after(25 if not self.events.empty() else 100, self.poll)
 
     def close(self):
         if self.closing:
@@ -229,18 +326,21 @@ class DownloaderGUI:
         self.finish_close()
 
     def finish_close(self):
+        self.close_job = None
         if self.running:
             self.stop()
-            self.root.after(100, self.finish_close)
+            self.close_job = self.root.after(100, self.finish_close)
         else:
             self.save_settings()
+            if self.poll_job is not None:
+                self.root.after_cancel(self.poll_job)
+                self.poll_job = None
             self.root.destroy()
 
 
 def main():
-    root = ttk.Window(themename="darkly")
-    DownloaderGUI(root)
-    root.mainloop()
+    from gui import main as caption_main
+    caption_main(initial_tool="download")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+from runtime_config import pipeline_images
 from source_tag_file import read_source_tags
 from pathlib import Path
 import csv
@@ -10,7 +11,7 @@ from cache_seed import ensure_runtime_cache
 # Configuration
 # -------------------------------------------------
 SCRIPT_DIR = Path(__file__).parent.resolve()
-IMAGES_DIR = (SCRIPT_DIR / ".." / "images").resolve()
+IMAGES_DIR = pipeline_images()
 
 CHARACTER_DB = SCRIPT_DIR / "caches/danbooru_character_explanationsFromVLM.sqlite3"
 WIKI_CACHE_DB = SCRIPT_DIR / "caches/cache_wiki.sqlite3"

@@ -1,3 +1,4 @@
+from runtime_config import pipeline_images
 from quality_tags import get_quality_tag
 import os
 import csv
@@ -11,7 +12,7 @@ from year_tags import get_year_tag
 
 # ---------------- CONFIG ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-IMAGE_FOLDER = os.path.join(SCRIPT_DIR, "..", "images")
+IMAGE_FOLDER = pipeline_images().as_posix()
 IMAGE_FOLDER = os.path.abspath(IMAGE_FOLDER)
 os.makedirs(IMAGE_FOLDER, exist_ok=True)
 

@@ -1,6 +1,8 @@
 """Generate Torii structured notes and long captions through Ollama."""
 
 from __future__ import annotations
+
+from runtime_config import pipeline_images
 from image_failures import is_skipped, skip_image
 
 import hashlib
@@ -21,7 +23,7 @@ from tqdm import tqdm
 from caption_progress import caption_progress
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-IMAGES_DIR = (SCRIPT_DIR / ".." / "images").resolve()
+IMAGES_DIR = pipeline_images()
 TORII_OUTPUT_CACHE = SCRIPT_DIR / "caches" / "toriiOutput.sqlite3"
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 

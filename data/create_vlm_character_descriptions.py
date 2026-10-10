@@ -1,3 +1,4 @@
+from runtime_config import pipeline_images
 from image_failures import is_skipped
 """Generate character reference descriptions with the configured Ollama model."""
 import csv
@@ -11,7 +12,7 @@ from runtime_config import load_positive_int, load_setting
 from tqdm import tqdm
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-IMAGES = (SCRIPT_DIR / ".." / "images").resolve()
+IMAGES = pipeline_images()
 CACHE = SCRIPT_DIR / "caches" / "danbooru_character_explanationsFromVLM.sqlite3"
 CACHE.parent.mkdir(parents=True, exist_ok=True)
 OUTPUT = CACHE
