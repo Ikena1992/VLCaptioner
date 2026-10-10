@@ -13,6 +13,10 @@ configuration](#configuration), put one image and a matching tag file in
 `images/`, then [start the GUI](#captioning-images). Check the resulting files
 in `done/` before processing a larger dataset.
 
+![VLCaptioner captioning GUI and copy/move images window](docs/images/gui-overview.png)
+
+The captioning GUI (left) and the copy/move tool with tag filters (right).
+
 ## Setup
 
 You need Python 3, Git, a Danbooru account and API key, and an
