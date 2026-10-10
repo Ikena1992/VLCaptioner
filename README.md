@@ -18,58 +18,6 @@ in `done/` before processing a larger dataset.
 
 The captioning GUI (left) and the copy/move tool with tag filters (right).
 
-## Image downloader
-
-Start the captioning GUI with `GUI.cmd` on Windows or `bash GUI.sh` on Linux,
-then select **Open image downloader** in **2. Download images (optional)**.
-The downloader opens in a separate window with no viewer and does not require
-Ollama. No separate downloader launcher is needed. On Windows, `GUI.cmd`
-launches `data/GUI.pyw` using the installed Python environment.
-
-1. Add a row for each search and choose **Danbooru** or **Gelbooru**.
-2. Enter space-separated search tags, such as `blue_eyes long_hair`.
-3. Set a positive **Post limit**. This is the number of posts checked, including
-   blacklisted posts, images already in `images/` or `done/`, unavailable
-   originals, unsupported files, and failed downloads. A limit of 100 can
-   download fewer than 100 images.
-4. Optionally enter a **Tag blacklist**, such as `tall_image watermark comic`.
-   Use spaces, just like search tags. Keep underscores within tags:
-   `tall_image` matches that tag; `tall image` does not. Any matching blacklist
-   tag skips the image. Matching uses whole tags and ignores letter case and
-   extra spaces. The blacklist applies to every row; leave it blank to allow
-   all tags. Older saved comma-separated blacklists are converted on reopening.
-5. Select **Start downloads**. Rows run sequentially. **Stop** cancels the queue;
-   an active network request may need to return first. Closing the window
-   waits for cancellation and cleanup.
-
-Original image files are saved in `images/` as `<md5>.<original extension>`.
-Each download also saves `<md5>.txt` and `<md5>.csv` using the captioner's
-existing tag writer: categorized tags, readable spaces instead of underscores,
-safety/quality tags, and CSV source metadata. Gelbooru categories use the shared
-tag cache and API. Existing nonempty TXT files are preserved; skipped images
-are not modified. CSV metadata is enriched using the same rules as the captioner,
-preserving existing nonempty fields.
-
-The downloader remembers all rows and the blacklist when starting downloads
-or closing the window, and restores them on reopening. Settings are stored
-locally in `data/caches/downloader_settings.json`; reopening never starts
-downloads automatically.
-
-The log shows search pages, post IDs, original filenames, tag-file preparation,
-and reasons for skips (including the matching blacklist tags or existing MD5
-images). It also explains download failures and when the post limit is reached.
-Each row ends with downloaded, skipped, blacklisted, unavailable, and failed counts.
-
-Matching MD5 image filenames anywhere in `images/` or `done/` (including subfolders
-and converted images with a different extension) are skipped. Downloaded files
-are verified against the site's MD5 before publication; partial files are removed.
-Tag files are prepared separately before publication, so cancellation during tag
-preparation does not leave TXT/CSV files without an image. Failed image publication
-rolls back changes to tag files. The completion status reports errors explicitly.
-Existing images are never overwritten. API credentials use the existing
-`DANBOORU_LOGIN` / `DANBOORU_API_KEY` and `GELBOORU_USER_ID` /
-`GELBOORU_API_KEY` settings in `config.txt`. Site search and account limits apply.
-
 ## Setup
 
 You need Python 3, Git, a Danbooru account and API key, and an
@@ -400,6 +348,58 @@ Run `python data/check_caption_quality.py --dry-run` to preview findings
 without moving files.
 
 ## Optional tools
+
+### Image downloader
+
+Start the captioning GUI with `GUI.cmd` on Windows or `bash GUI.sh` on Linux,
+then select **Open image downloader** in **2. Download images (optional)**.
+The downloader opens in a separate window with no viewer and does not require
+Ollama. No separate downloader launcher is needed. On Windows, `GUI.cmd`
+launches `data/GUI.pyw` using the installed Python environment.
+
+1. Add a row for each search and choose **Danbooru** or **Gelbooru**.
+2. Enter space-separated search tags, such as `blue_eyes long_hair`.
+3. Set a positive **Post limit**. This is the number of posts checked, including
+   blacklisted posts, images already in `images/` or `done/`, unavailable
+   originals, unsupported files, and failed downloads. A limit of 100 can
+   download fewer than 100 images.
+4. Optionally enter a **Tag blacklist**, such as `tall_image watermark comic`.
+   Use spaces, just like search tags. Keep underscores within tags:
+   `tall_image` matches that tag; `tall image` does not. Any matching blacklist
+   tag skips the image. Matching uses whole tags and ignores letter case and
+   extra spaces. The blacklist applies to every row; leave it blank to allow
+   all tags. Older saved comma-separated blacklists are converted on reopening.
+5. Select **Start downloads**. Rows run sequentially. **Stop** cancels the queue;
+   an active network request may need to return first. Closing the window
+   waits for cancellation and cleanup.
+
+Original image files are saved in `images/` as `<md5>.<original extension>`.
+Each download also saves `<md5>.txt` and `<md5>.csv` using the captioner's
+existing tag writer: categorized tags, readable spaces instead of underscores,
+safety/quality tags, and CSV source metadata. Gelbooru categories use the shared
+tag cache and API. Existing nonempty TXT files are preserved; skipped images
+are not modified. CSV metadata is enriched using the same rules as the captioner,
+preserving existing nonempty fields.
+
+The downloader remembers all rows and the blacklist when starting downloads
+or closing the window, and restores them on reopening. Settings are stored
+locally in `data/caches/downloader_settings.json`; reopening never starts
+downloads automatically.
+
+The log shows search pages, post IDs, original filenames, tag-file preparation,
+and reasons for skips (including the matching blacklist tags or existing MD5
+images). It also explains download failures and when the post limit is reached.
+Each row ends with downloaded, skipped, blacklisted, unavailable, and failed counts.
+
+Matching MD5 image filenames anywhere in `images/` or `done/` (including subfolders
+and converted images with a different extension) are skipped. Downloaded files
+are verified against the site's MD5 before publication; partial files are removed.
+Tag files are prepared separately before publication, so cancellation during tag
+preparation does not leave TXT/CSV files without an image. Failed image publication
+rolls back changes to tag files. The completion status reports errors explicitly.
+Existing images are never overwritten. API credentials use the existing
+`DANBOORU_LOGIN` / `DANBOORU_API_KEY` and `GELBOORU_USER_ID` /
+`GELBOORU_API_KEY` settings in `config.txt`. Site search and account limits apply.
 
 ### Copy or move images by tags
 
