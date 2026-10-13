@@ -11,7 +11,7 @@ from tkinter import font as tkfont
 
 import ttkbootstrap as ttk
 
-from booru_downloader import DownloadJob, ImageIndex, failure_reason, gap_tag, parse_blacklist, run_job
+from booru_downloader import DatasetCountError, DownloadJob, ImageIndex, failure_reason, gap_tag, parse_blacklist, run_job
 from runtime_config import PROJECT_DIR
 import caption_queue
 
@@ -107,7 +107,7 @@ class DownloaderGUI:
         ]
         for column, widget in enumerate(self.editor_widgets):
             widget.grid(row=0, column=column, sticky="ew", padx=(0, 6))
-        ttk.Label(frame, text="Fill gaps in the dataset: set Target in done separately for each row (one tag per row). Leave target blank for normal post limits. "
+        ttk.Label(frame, text="Fill gaps in the dataset: set Target in done separately for each row (one tag per row). Counts include done/ and done1/ when available. Leave target blank for normal post limits. "
                   "Gap mode ignores the post limit and downloads new images until the gap is covered or results run out. "
                   "Enable Caption automatically to send them through to done/.", wraplength=720).pack(anchor='w')
         for variable in (self.edit_source, self.edit_tags, self.edit_limit, self.edit_target):
@@ -380,6 +380,7 @@ class DownloaderGUI:
                 return images
 
             gap_progress = {}
+            track_gap = any(job.target_count is not None for job in jobs)
             for index, job in enumerate(jobs, 1):
                 if self.cancel.is_set():
                     break
@@ -390,11 +391,14 @@ class DownloaderGUI:
                                      log=lambda message: self.events.put(("log", f"Row {index}: {message}")),
                                      on_download=received if self.caption_batches else None,
                                      destination=destination if self.caption_batches else None,
-                                     **({'gap_progress': gap_progress} if job.target_count is not None else {}))
+                                     **({'gap_progress': gap_progress} if track_gap else {}))
                     self.events.put(("log", f"Row {index}: " + ", ".join(f"{value} {key}" for key, value in counts.items())))
                     had_errors = had_errors or bool(counts["failed"])
                 except Exception as error:
                     had_errors = True
+                    if isinstance(error, DatasetCountError):
+                        self.events.put(('log', f'Downloads stopped: {error}'))
+                        break
                     if isinstance(error, caption_queue.QueueSubmissionError):
                         self.events.put(("log", "Downloads stopped because the caption queue could not be saved. "
                                          "Check disk space and folder permissions before starting again."))

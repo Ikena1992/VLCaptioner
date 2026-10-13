@@ -22,6 +22,10 @@ MD5 = re.compile(r"^[0-9a-f]{32}$", re.I)
 IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "avif"}
 
 
+class DatasetCountError(RuntimeError):
+    """Gap targets cannot be trusted until local dataset problems are fixed."""
+
+
 @dataclass(frozen=True)
 class DownloadJob:
     source: str
@@ -250,24 +254,37 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
     counts = dict(downloaded=0, skipped=0, blacklisted=0, unavailable=0, failed=0)
     gap = None
     progress = None
+    if job.target_count is not None or gap_progress is not None:
+        from dataset_manager import scan_dataset, normalize
+        gap_progress = {} if gap_progress is None else gap_progress
+        snapshot_key = ('dataset_counts', str(done.resolve()))
+        downloaded_key = ('downloaded_counts', str(done.resolve()))
+        if snapshot_key not in gap_progress:
+            folders = [folder for folder in (done, done.parent / 'done1') if folder.exists()]
+            log('Counting tags in done/ and optional done1/ once for this download run...')
+            dataset = scan_dataset(folders, cancelled=cancel.is_set)
+            if dataset is None:
+                return counts
+            if dataset.warnings:
+                raise DatasetCountError("Could not reliably count done/ and done1/. Check unreadable tag files and folder permissions.")
+            snapshot = {}
+            for dataset_tag, paths in dataset.matches.items():
+                identities = {('md5', path.stem.casefold()) if MD5.fullmatch(path.stem)
+                              else ('path', os.path.normcase(str(path.resolve())))
+                              for path in paths}
+                snapshot[dataset_tag] = len(identities)
+            gap_progress[snapshot_key] = snapshot
+            gap_progress[downloaded_key] = {}
+        progress = gap_progress[downloaded_key]
     if job.target_count is not None:
         tag = gap_tag(job.source, job.tags)
         if job.target_count < 1:
             raise ValueError("Gap filling requires one positive tag and a positive dataset target")
-        from dataset_manager import scan_dataset, normalize
-        gap_progress = {} if gap_progress is None else gap_progress
         key = normalize(tag)
-        if key not in gap_progress:
-            dataset = scan_dataset([done] if done.exists() else [], cancelled=cancel.is_set)
-            if dataset is None:
-                return counts
-            if dataset.warnings:
-                raise RuntimeError("Could not reliably count the done dataset")
-            gap_progress[key] = [dataset.counts[key], 0]
-        progress = gap_progress[key]
-        current, downloaded_earlier = progress
+        current = gap_progress[snapshot_key].get(key, 0)
+        downloaded_earlier = progress.get(key, 0)
         gap = max(0, job.target_count - current - downloaded_earlier)
-        log(f"Fill gaps: {current} initially in done/, {downloaded_earlier} downloaded earlier; target {job.target_count}; need {gap} new images.")
+        log(f"Fill gaps: {current} unique matching images initially in done/ and optional done1/, {downloaded_earlier} downloaded earlier; target {job.target_count}; need {gap} new images.")
         if not gap:
             return counts
     examined = 0
@@ -309,7 +326,12 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
                     break
                 counts[result] += 1
                 if result == 'downloaded' and progress is not None:
-                    progress[1] += 1
+                    post_tags = str(post.get('tag_string', post.get('tags', '')))
+                    downloaded_tags = {normalize(value) for value in unescape(post_tags).split()}
+                    if job.target_count is not None:
+                        downloaded_tags.add(key)
+                    for downloaded_tag in downloaded_tags:
+                        progress[downloaded_tag] = progress.get(downloaded_tag, 0) + 1
             except (requests.RequestException, OSError, RuntimeError, ValueError):
                 counts["failed"] += 1
                 report(examined, counts.copy())

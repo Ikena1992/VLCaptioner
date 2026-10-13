@@ -568,13 +568,14 @@ and a Gelbooru row with `sort:score`, with automatic captioning enabled.
 Both rows share gap progress, so the second source fills only the remaining gap.
 Set **Target in done** independently for each row to the desired total
 number of matching images in `done/`, then start downloads. Gap filling uses
-one positive tag per row and counts matching image/TXT pairs in `done/`.
+one positive tag per row and counts matching image/TXT pairs in `done/` and
+`done1/` when available. Copies sharing an MD5 filename count only once.
 It downloads the difference, ignoring the post limit; duplicates, blacklisted
 posts, and failed downloads do not consume the gap. It stops when enough new
 images have downloaded, search results run out, or you click Stop. Leave the
 target blank for ordinary downloads. Captioning must finish successfully to
 reach the target in `done/`; rerun gap filling after captioning if images failed
-or went to review. `done1/` remains an optional duplicate-check folder.
+or went to review. `done1/` also remains an optional duplicate-check folder.
 
 The combined dataset counts each image once, including when selected folders
 overlap. Each dataset column counts membership in its own folder. Caption
