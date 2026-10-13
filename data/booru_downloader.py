@@ -40,7 +40,7 @@ def gap_tag(source, query):
     """Extract one dataset tag, allowing the source's score sort modifier."""
     modifier = 'order:score' if source == 'Danbooru' else 'sort:score'
     tags = [tag for tag in query.split() if tag.casefold() != modifier]
-    if len(tags) != 1 or tags[0].startswith('-') or ':' in tags[0]:
+    if len(tags) != 1 or tags[0].startswith('-') or tags[0].casefold().startswith(('order:', 'sort:')):
         raise ValueError('Gap filling requires one positive tag, optionally sorted by score')
     return tags[0]
 

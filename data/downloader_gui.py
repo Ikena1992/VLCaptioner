@@ -18,6 +18,31 @@ import caption_queue
 SETTINGS_FILE = PROJECT_DIR / "data" / "caches" / "downloader_settings.json"
 
 
+def download_job_from_row(row, blacklist):
+    tags = row['tags'].strip()
+    if not tags:
+        raise ValueError('Search tags are empty.')
+    if row['source'] not in ('Danbooru', 'Gelbooru'):
+        raise ValueError('Choose Danbooru or Gelbooru.')
+    target = row.get('target', '').strip()
+    if target:
+        try:
+            target = int(target)
+            if target < 1:
+                raise ValueError()
+        except ValueError:
+            raise ValueError('Target in done must be a positive whole number.') from None
+        gap_tag(row['source'], tags)
+        return DownloadJob(row['source'], tags, 100, blacklist, target)
+    try:
+        limit = int(row['limit'])
+        if limit < 1:
+            raise ValueError()
+    except ValueError:
+        raise ValueError('Post limit must be a positive whole number when Target in done is blank.') from None
+    return DownloadJob(row['source'], tags, limit, blacklist)
+
+
 class DownloaderGUI:
     def __init__(self, root, settings_file=SETTINGS_FILE, can_start=None):
         self.root = root
@@ -82,7 +107,7 @@ class DownloaderGUI:
         ]
         for column, widget in enumerate(self.editor_widgets):
             widget.grid(row=0, column=column, sticky="ew", padx=(0, 6))
-        ttk.Label(frame, text="Fill gaps in the dataset: enter a target in done/ (one tag per row). Leave target blank for normal post limits. "
+        ttk.Label(frame, text="Fill gaps in the dataset: set Target in done separately for each row (one tag per row). Leave target blank for normal post limits. "
                   "Gap mode ignores the post limit and downloads new images until the gap is covered or results run out. "
                   "Enable Caption automatically to send them through to done/.", wraplength=720).pack(anchor='w')
         for variable in (self.edit_source, self.edit_tags, self.edit_limit, self.edit_target):
@@ -195,15 +220,15 @@ class DownloaderGUI:
             return
         identifiers = []
         group = uuid.uuid4().hex
-        for source, modifier in (('Danbooru', 'order:score'), ('Gelbooru', 'sort:score')):
+        for source, modifier, target in (('Danbooru', 'order:score', '200'), ('Gelbooru', 'sort:score', '250')):
             query = f'{tag} {modifier}'
             identifier = next((key for key, row in self.rows.items() if not row['tags'].strip()), None)
             if identifier is None:
-                identifier = self.add_row(source, query, target_value='100')
+                identifier = self.add_row(source, query, target_value=target)
             else:
-                self.rows[identifier].update(source=source, tags=query, target='100')
+                self.rows[identifier].update(source=source, tags=query, target=target)
                 row = self.rows[identifier]
-                self.table.item(identifier, values=(source, query, row['limit'], '100'))
+                self.table.item(identifier, values=(source, query, row['limit'], target))
             identifiers.append(identifier)
             self.rows[identifier]['gap_group'] = group
         identifier = identifiers[0]
@@ -251,24 +276,6 @@ class DownloaderGUI:
         row = self.rows[selected[0]]
         row.update(source=self.edit_source.get(), tags=self.edit_tags.get(), limit=self.edit_limit.get(), target=self.edit_target.get())
         self.table.item(selected[0], values=(row["source"], row["tags"], row["limit"], row["target"]))
-        # Both sources fill one dataset target; editing either must update its partner.
-        try:
-            tag = gap_tag(row['source'], row['tags']).casefold()
-        except ValueError:
-            return
-        for identifier, partner in self.rows.items():
-            if identifier == selected[0]:
-                continue
-            paired = bool(row.get('gap_group')) and row.get('gap_group') == partner.get('gap_group')
-            if not paired and not partner.get('target', '').strip():
-                continue
-            try:
-                matches = gap_tag(partner['source'], partner['tags']).casefold() == tag
-            except ValueError:
-                continue
-            if paired or matches:
-                partner['target'] = row['target']
-                self.table.item(identifier, values=(partner['source'], partner['tags'], partner['limit'], partner['target']))
 
     def remove_selected(self):
         if self.running or self.closing:
@@ -295,19 +302,23 @@ class DownloaderGUI:
             size = int(self.batch_size.get()) if self.auto_caption.get() else 50
             if size < 1:
                 raise ValueError()
-            blacklist = parse_blacklist(self.blacklist.get())
-            jobs = [DownloadJob(row["source"], row["tags"].strip(), 100 if row.get("target", "").strip() else int(row["limit"]), blacklist,
-                                int(row["target"]) if row.get("target", "").strip() else None)
-                    for row in self.rows.values()]
-            if not jobs or any(not job.tags or job.limit < 1 for job in jobs):
-                raise ValueError()
-            for job in jobs:
-                if job.target_count is not None:
-                    gap_tag(job.source, job.tags)
-                    if job.target_count < 1:
-                        raise ValueError()
         except ValueError:
-            messagebox.showerror("Image downloader", "Enter tags and positive whole-number limits, targets, and batch size. Gap filling requires one positive tag per row.")
+            messagebox.showerror('Image downloader', 'Images per batch must be a positive whole number.', parent=self.root)
+            return
+        blacklist = parse_blacklist(self.blacklist.get())
+        jobs = []
+        for index, (identifier, row) in enumerate(self.rows.items(), 1):
+            try:
+                jobs.append(download_job_from_row(row, blacklist))
+            except ValueError as error:
+                self.table.selection_set(identifier)
+                self.table.see(identifier)
+                self.select_row()
+                messagebox.showerror('Image downloader',
+                                     f"Row {index} ({row['source']}): {row['tags']}\n\n{error}", parent=self.root)
+                return
+        if not jobs:
+            messagebox.showerror('Image downloader', 'Add at least one download row.', parent=self.root)
             return
         self.save_settings()
         self.caption_batches = self.auto_caption.get()

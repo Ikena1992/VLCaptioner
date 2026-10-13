@@ -198,7 +198,7 @@ class DatasetManager(ttk.Frame):
         panes.add(left, weight=3)
         panes.add(right, weight=2)
         columns = ('tag', 'category', 'images', 'percent', 'first', 'second')
-        self.table = ttk.Treeview(left, columns=columns, show='headings', selectmode='browse')
+        self.table = ttk.Treeview(left, columns=columns, show='headings', selectmode='extended')
         for column, label, width in zip(columns, ('Tag', 'Category', 'Images', '% of images', 'Dataset 1', 'Dataset 2'), (260, 95, 70, 85, 75, 75)):
             self.table.heading(column, text=label, command=lambda c=column: self.sort(c))
             self.table.column(column, width=width, anchor='w' if column in ('tag', 'category') else 'e')
@@ -383,8 +383,9 @@ class DatasetManager(ttk.Frame):
     def download_more(self):
         selected = self.table.selection()
         if selected and self.download_more_callback:
-            tag = self.table.item(selected[0], 'values')[0]
-            self.download_more_callback(tag.replace(' ', '_'))
+            for identifier in selected:
+                tag = self.table.item(identifier, 'values')[0]
+                self.download_more_callback(tag.replace(' ', '_'))
 
     def select_tag(self, event=None):
         selected = self.table.selection()

@@ -562,10 +562,11 @@ Gelbooru caches; missing classifications appear as Unknown. Scanning does not
 modify images, tag files, or caches. Reopening the manager focuses its existing
 window, and closing the captioner closes the manager too.
 
-Select a tag and click **Download more…** to add a Danbooru row with `order:score`
+Select one or more tags (Ctrl-click or Shift-click) and click **Download more…**
+to add a pair of downloader rows for each tag: a Danbooru row with `order:score`
 and a Gelbooru row with `sort:score`, with automatic captioning enabled.
 Both rows share gap progress, so the second source fills only the remaining gap.
-Set **Target in done** on either paired row to the desired total (the other updates automatically)
+Set **Target in done** independently for each row to the desired total
 number of matching images in `done/`, then start downloads. Gap filling uses
 one positive tag per row and counts matching image/TXT pairs in `done/`.
 It downloads the difference, ignoring the post limit; duplicates, blacklisted
