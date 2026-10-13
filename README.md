@@ -548,3 +548,34 @@ metadata before captioning.
 
 VLCaptioner's software is licensed under [Apache 2.0](LICENSE). Third-party
 models and data retain their respective terms.
+
+### Dataset manager
+
+Click **Open dataset manager** in **2. Download images (optional)** to browse
+the tags in `done/`. Dataset 2 is empty by default and can be selected for
+comparison. Scanning starts only when you click
+**Scan / Refresh**, and **Cancel scan** stops it while keeping previous results.
+You can choose other folders, filter tags by
+category and image count, preview matching images and TXT files, and export
+the filtered statistics as CSV. Categories come from the local Danbooru and
+Gelbooru caches; missing classifications appear as Unknown. Scanning does not
+modify images, tag files, or caches. Reopening the manager focuses its existing
+window, and closing the captioner closes the manager too.
+
+Select a tag and click **Download more…** to add a Danbooru row with `order:score`
+and a Gelbooru row with `sort:score`, with automatic captioning enabled.
+Both rows share gap progress, so the second source fills only the remaining gap.
+Set **Target in done** on either paired row to the desired total (the other updates automatically)
+number of matching images in `done/`, then start downloads. Gap filling uses
+one positive tag per row and counts matching image/TXT pairs in `done/`.
+It downloads the difference, ignoring the post limit; duplicates, blacklisted
+posts, and failed downloads do not consume the gap. It stops when enough new
+images have downloaded, search results run out, or you click Stop. Leave the
+target blank for ordinary downloads. Captioning must finish successfully to
+reach the target in `done/`; rerun gap filling after captioning if images failed
+or went to review. `done1/` remains an optional duplicate-check folder.
+
+The combined dataset counts each image once, including when selected folders
+overlap. Each dataset column counts membership in its own folder. Caption
+variants such as `.long.txt` and `.short.txt`, comment lines, and VLTagger
+metadata are excluded from tag statistics.

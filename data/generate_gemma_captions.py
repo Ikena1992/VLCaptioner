@@ -8,6 +8,7 @@ from image_failures import is_skipped, skip_image
 import argparse
 import csv
 import hashlib
+import json
 import importlib.util
 import random
 import re
@@ -23,6 +24,7 @@ from parquet_captions import load_parquet_captions
 from runtime_config import load_positive_int, load_setting
 from tqdm import tqdm
 from caption_progress import caption_progress
+from check_caption_quality import caption_text_issues
 
 import create_clean_tag_files as tag_files
 import finalize_caption_dataset as finalizer
@@ -33,6 +35,37 @@ CAPTION_CACHE = SCRIPT_DIR / "caches" / "captionResultsCache.sqlite3"
 CAPTION_MAX_NEW_TOKENS = {"short": 384, "long": 1536}
 DEFAULT_CAPTION_CONTEXT_SIZE = 65536
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+
+class CaptionReviewError(RuntimeError):
+    def __init__(self, kind, text, issues):
+        super().__init__("; ".join(issues))
+        self.kind = kind
+        self.text = text
+
+
+def validate_caption(text, kind, payload=None):
+    normalized = normalize_caption_output(text)
+    issues = caption_text_issues(normalized, f".{kind}")
+    if not normalized:
+        issues = [f"{kind.capitalize()} caption was empty after normalization"]
+    if payload and payload.get("done_reason") == "length":
+        issues.append(f".{kind} response truncated at the token limit")
+    if issues:
+        raise CaptionReviewError(kind, normalized, issues)
+    return normalized
+
+
+def send_caption_to_review(image_path, error):
+    extensions = {".txt", ".short", ".long", ".tag", ".combined", ".csv", ".toriiOutput"}
+    sources = [image_path] + [image_path.with_suffix(ext) for ext in extensions
+                              if image_path.with_suffix(ext).is_file()]
+    finalizer.publish_files(sources, {
+        image_path.with_suffix(f".{error.kind}").name: error.text,
+        image_path.with_suffix(".review.json").name: json.dumps(
+            {"reason": str(error), "caption_kind": error.kind}, ensure_ascii=False),
+    }, review_issues=[str(error)])
+    tqdm.write(f"REVIEW {image_path.name}: {error}")
 
 
 def is_context_size_error(error):
@@ -95,6 +128,7 @@ def get_cached_caption(image_path, caption_kind, model, prompt, cache_path=CAPTI
 
 
 def save_cached_caption(image_path, caption_kind, model, prompt, caption, cache_path=CAPTION_CACHE):
+    caption = validate_caption(caption, caption_kind)
     image_digest = file_hash(image_path)
     database = sqlite3.connect(cache_path)
     try:
@@ -116,7 +150,10 @@ def normalize_caption_output(text):
         "", text,
     )
     text = re.sub(r"(?m)^\s*>\s*", "", text)
-    return re.sub(r"\s+", " ", text).strip().strip('"').strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
+        text = text[1:-1].strip()
+    return text
 
 
 def load_artist_names(image_path):
@@ -245,6 +282,8 @@ def cache_parquet_long_captions(
                 cache_path,
             )
             cached += 1
+        except CaptionReviewError as error:
+            tqdm.write(f"Not caching invalid Parquet caption for {image_path.name}: {error}")
         except Exception as error:
             skip_image(image_path, error)
     return cached
@@ -272,8 +311,11 @@ def generate_caption(
     cached = None
     if not overwrite_caption_cache:
         cached = get_cached_caption(image_path, kind, model, prompt, cache_path)
-    if cached and normalize_caption_output(cached):
-        return cached
+    if cached:
+        try:
+            return validate_caption(cached, kind)
+        except CaptionReviewError:
+            tqdm.write(f"Ignoring invalid cached {kind} caption for {image_path.name}")
     options = {
         "temperature": 0.0,
         "num_predict": CAPTION_MAX_NEW_TOKENS[kind],
@@ -283,17 +325,16 @@ def generate_caption(
         "stop": ["END_CAPTION"],
     }
     try:
-        text, _ = client.chat(model, prompt, image_path, options)
+        text, payload = client.chat(model, prompt, image_path, options)
     except RuntimeError as error:
         if not is_token_repeat_error(error):
             raise
         tqdm.write(f"Retrying {image_path.name} ({kind}): token repeat limit reached")
         # Change greedy decoding so the retry can escape the same repetition loop.
-        text, _ = client.chat(model, prompt, image_path, {
+        text, payload = client.chat(model, prompt, image_path, {
             **options, "temperature": 0.3, "repeat_penalty": 1.2,
         })
-    if not normalize_caption_output(text):
-        raise RuntimeError(f"Generated {kind} caption was empty")
+    text = validate_caption(text, kind, payload)
     save_cached_caption(image_path, kind, model, prompt, text, cache_path)
     return text
 
@@ -326,9 +367,7 @@ def process_image(
             overwrite_caption_cache=overwrite_caption_cache,
             context_size=context_size,
         )
-    long_text = normalize_caption_output(long_text)
-    if not long_text:
-        raise RuntimeError("Long caption was empty after normalization")
+    long_text = validate_caption(long_text, "long")
     if not reuse_existing_long and not overwrite_caption_files:
         long_path.write_text(long_text + "\n", encoding="utf-8")
     short_text = generate_caption(
@@ -465,6 +504,7 @@ def main(argv=None):
             skip_image(image_path, error)
     failed_context = 0
     failed_repeat = 0
+    reviewed = 0
     if prompts and configured_model.lower() != "auto":
         client.ensure_model(model, tqdm.write)
     refinement_started = time.monotonic()
@@ -482,6 +522,13 @@ def main(argv=None):
                 args.overwrite_caption_files,
             )
             finish_image(image_path)
+        except CaptionReviewError as error:
+            try:
+                send_caption_to_review(image_path, error)
+                reviewed += 1
+            except Exception as publication_error:
+                failed_other += 1
+                skip_image(image_path, publication_error)
         except Exception as error:
             skip_image(image_path, error)
             if is_token_repeat_error(error):
@@ -506,6 +553,8 @@ def main(argv=None):
             "Retry the pipeline to process skipped images. For context-size "
             "failures, increase OLLAMA_CONTEXT_SIZE first."
         )
+    if reviewed:
+        print(f"Sent {reviewed} image(s) to captionReview for invalid or truncated captions.")
     print("\nDone!\n")
     return 0
 

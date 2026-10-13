@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import requests
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 class OllamaUnavailableError(RuntimeError):
@@ -20,15 +20,33 @@ class OllamaClient:
         self.url = url.rstrip("/")
         self.timeout = timeout
         self._verified_models: set[str] = set()
+        self._encoded_image_key = None
+        self._encoded_image = None
 
     @staticmethod
     def image_to_base64(path: Path, max_size=(1024, 1024)) -> str:
+        """Encode a resized inference copy as RGB JPEG; preserve the source file."""
         with Image.open(path) as image:
-            image = image.convert("RGB")
+            image = ImageOps.exif_transpose(image).convert("RGB")
             image.thumbnail(max_size)
             buffer = io.BytesIO()
             image.save(buffer, format="JPEG", quality=95)
         return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    def encoded_image(self, path: Path) -> str:
+        """Reuse the current image across a stage's requests and retries.
+
+        Stages process images sequentially, so keeping only the latest image
+        avoids retaining a whole dataset in memory. File changes invalidate it.
+        """
+        path = Path(path).resolve()
+        stat = path.stat()
+        key = (path, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        if key != self._encoded_image_key:
+            encoded = self.image_to_base64(path)
+            self._encoded_image_key = key
+            self._encoded_image = encoded
+        return self._encoded_image
 
     @staticmethod
     def _raise_for_status(response) -> None:
@@ -86,6 +104,7 @@ class OllamaClient:
                 ) as pull_response:
                     self._raise_for_status(pull_response)
                     last_status = None
+                    completed = False
                     for raw_line in pull_response.iter_lines():
                         if not raw_line:
                             continue
@@ -100,9 +119,15 @@ class OllamaClient:
                                 f"Ollama could not pull {model}: {update['error']}"
                             )
                         current = update.get("status")
+                        if current == "success":
+                            completed = True
                         if current and current != last_status:
                             status(f"Ollama pull: {current}")
                             last_status = current
+                    if not completed:
+                        raise OllamaUnavailableError(
+                            f"Ollama model pull ended before completing {model}"
+                        )
             except (requests.RequestException, RuntimeError) as error:
                 raise OllamaUnavailableError(f"Failed to pull Ollama model {model}: {error}") from error
         self._verified_models.add(model)
@@ -120,7 +145,7 @@ class OllamaClient:
             messages.append({"role": "system", "content": system_prompt})
         user_message = {"role": "user", "content": prompt}
         if image_path is not None:
-            user_message["images"] = [self.image_to_base64(image_path)]
+            user_message["images"] = [self.encoded_image(image_path)]
         messages.append(user_message)
         try:
             response = requests.post(
@@ -149,7 +174,7 @@ class OllamaClient:
             raise RuntimeError(f"Ollama request failed: {error}") from error
         payload = response.json()
         text = payload.get("message", {}).get("content", "").strip()
-        if not text:
+        if not text and payload.get("done_reason") != "length":
             raise RuntimeError(
                 "Ollama returned an empty response "
                 f"(done_reason={payload.get('done_reason', 'unknown')})"

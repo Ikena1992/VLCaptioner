@@ -28,11 +28,21 @@ class DownloadJob:
     tags: str
     limit: int = 100
     blacklist: frozenset[str] = frozenset()
+    target_count: int | None = None
 
 
 def parse_blacklist(text):
     """Whitespace-separated exact tags, matching the search field's syntax."""
     return frozenset(tag.casefold() for tag in text.split())
+
+
+def gap_tag(source, query):
+    """Extract one dataset tag, allowing the source's score sort modifier."""
+    modifier = 'order:score' if source == 'Danbooru' else 'sort:score'
+    tags = [tag for tag in query.split() if tag.casefold() != modifier]
+    if len(tags) != 1 or tags[0].startswith('-') or ':' in tags[0]:
+        raise ValueError('Gap filling requires one positive tag, optionally sorted by score')
+    return tags[0]
 
 
 def is_blacklisted(post, blacklist):
@@ -233,15 +243,40 @@ def save_original(post, source, images, done, known, cancel, log=lambda message:
 
 
 def run_job(job, images, done, known, cancel, report, log=lambda message: None,
-            on_download=None, destination=None):
-    if job.source not in ("Danbooru", "Gelbooru") or job.limit < 1 or not job.tags.strip():
+            on_download=None, destination=None, gap_progress=None):
+    if job.source not in ("Danbooru", "Gelbooru") or (job.target_count is None and job.limit < 1) or not job.tags.strip():
         raise ValueError("Tags and a positive post limit are required")
     images.mkdir(parents=True, exist_ok=True)
     counts = dict(downloaded=0, skipped=0, blacklisted=0, unavailable=0, failed=0)
+    gap = None
+    progress = None
+    if job.target_count is not None:
+        tag = gap_tag(job.source, job.tags)
+        if job.target_count < 1:
+            raise ValueError("Gap filling requires one positive tag and a positive dataset target")
+        from dataset_manager import scan_dataset, normalize
+        gap_progress = {} if gap_progress is None else gap_progress
+        key = normalize(tag)
+        if key not in gap_progress:
+            dataset = scan_dataset([done] if done.exists() else [], cancelled=cancel.is_set)
+            if dataset is None:
+                return counts
+            if dataset.warnings:
+                raise RuntimeError("Could not reliably count the done dataset")
+            gap_progress[key] = [dataset.counts[key], 0]
+        progress = gap_progress[key]
+        current, downloaded_earlier = progress
+        gap = max(0, job.target_count - current - downloaded_earlier)
+        log(f"Fill gaps: {current} initially in done/, {downloaded_earlier} downloaded earlier; target {job.target_count}; need {gap} new images.")
+        if not gap:
+            return counts
     examined = 0
     page = 0
     seen = set()
-    while examined < job.limit and not cancel.is_set():
+    def reached_limit():
+        return counts['downloaded'] >= gap if gap is not None else examined >= job.limit
+
+    while not reached_limit() and not cancel.is_set():
         if isinstance(known, ImageIndex):
             known.refresh(force=True)
         log(f"Searching {job.source}, page {page + 1}: {job.tags}")
@@ -251,7 +286,7 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
             break
         fresh = False
         for post in posts:
-            if cancel.is_set() or examined >= job.limit:
+            if cancel.is_set() or reached_limit():
                 break
             identity = str(post.get("id") or post.get("md5") or repr(post))
             if identity in seen:
@@ -259,7 +294,7 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
             seen.add(identity)
             fresh = True
             examined += 1
-            label = f"{job.source} post {post.get('id', 'unknown')} [{examined}/{job.limit}]"
+            label = f"{job.source} post {post.get('id', 'unknown')} [{examined} checked]" if gap is not None else f"{job.source} post {post.get('id', 'unknown')} [{examined}/{job.limit}]"
             log(f"Checking {label}")
             post_log = lambda message: log(f"{label}: {message}")
             try:
@@ -273,6 +308,8 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
                 if result == "cancelled":
                     break
                 counts[result] += 1
+                if result == 'downloaded' and progress is not None:
+                    progress[1] += 1
             except (requests.RequestException, OSError, RuntimeError, ValueError):
                 counts["failed"] += 1
                 report(examined, counts.copy())
@@ -288,6 +325,8 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
         page += 1
     if cancel.is_set():
         log("Row stopped by user.")
+    elif gap is not None:
+        log(f"Gap downloads: {counts['downloaded']}/{gap}. Captioning must finish successfully to fill done/; rerun to fill any remaining gap.")
     elif examined >= job.limit:
         log(f"Post limit reached: {examined} posts checked (includes skipped and failed posts).")
     return counts

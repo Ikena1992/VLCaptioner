@@ -67,6 +67,7 @@ class PipelineGUI:
         self.root = root
         self.downloader_app = None
         self.copy_move_app = None
+        self.dataset_manager_app = None
         self.worker_handle = None
         self.manual_download_handle = None
         self.active_batch = None
@@ -152,8 +153,12 @@ class PipelineGUI:
         ttk.Label(downloads, text="Images and matching tag files are saved to images/. "
                   "Images already in images/, done/, or done1/ are skipped.",
                   wraplength=810, justify="left").pack(anchor="w", pady=(4, 8))
-        ttk.Button(downloads, text="Open image downloader", bootstyle="primary",
-                   command=self.open_downloader_gui).pack(anchor="w")
+        download_tools = ttk.Frame(downloads)
+        download_tools.pack(anchor="w")
+        ttk.Button(download_tools, text="Open image downloader", bootstyle="primary",
+                   command=self.open_downloader_gui).pack(side="left")
+        ttk.Button(download_tools, text="Open dataset manager", bootstyle="secondary-outline",
+                   command=self.open_dataset_manager_gui).pack(side="left", padx=(8, 0))
         images = ttk.Labelframe(run_page, text="3. Add images", padding=12)
         images.pack(fill="x", pady=(0, 12))
         ttk.Label(images, text="Place your images in the images folder. Matching tag files are optional.").pack(anchor="w")
@@ -395,6 +400,14 @@ class PipelineGUI:
             window, can_start=lambda automatic: not self.closing
             and not (self.copy_move_app and self.copy_move_app.running)
             and (automatic or not self.running)))
+
+    def open_dataset_manager_gui(self):
+        from dataset_manager import DatasetManager
+        self.open_tool("dataset_manager_app", lambda window: DatasetManager(window, download_more=self.download_more))
+
+    def download_more(self, tag):
+        self.open_downloader_gui()
+        self.downloader_app.prepare_gap_download(tag)
 
     def open_copy_move_gui(self):
         from copy_move_images_GUI import CopyMoveApp
@@ -718,7 +731,7 @@ class PipelineGUI:
             return
         self.closing = True
         self.queue_paused = True
-        for app in (self.downloader_app, self.copy_move_app):
+        for app in (self.downloader_app, self.copy_move_app, self.dataset_manager_app):
             if app is not None and app.root.winfo_exists():
                 app.close()
         if self.running:
@@ -727,7 +740,7 @@ class PipelineGUI:
 
     def finish_close(self):
         children_open = any(app is not None and app.root.winfo_exists()
-                            for app in (self.downloader_app, self.copy_move_app))
+                            for app in (self.downloader_app, self.copy_move_app, self.dataset_manager_app))
         if self.running or children_open:
             self.root.after(100, self.finish_close)
         else:

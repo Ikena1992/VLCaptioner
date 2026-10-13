@@ -4,13 +4,14 @@ import json
 from pathlib import Path
 import tempfile
 import threading
+import uuid
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
 from tkinter import font as tkfont
 
 import ttkbootstrap as ttk
 
-from booru_downloader import DownloadJob, ImageIndex, failure_reason, parse_blacklist, run_job
+from booru_downloader import DownloadJob, ImageIndex, failure_reason, gap_tag, parse_blacklist, run_job
 from runtime_config import PROJECT_DIR
 import caption_queue
 
@@ -54,10 +55,10 @@ class DownloaderGUI:
         table_panel.pack(fill="both", expand=True, pady=8)
         ttk.Style().configure("DownloadRows.Treeview",
                               rowheight=max(22, tkfont.nametofont("TkDefaultFont").metrics("linespace") + 4))
-        self.table = ttk.Treeview(table_panel, columns=("source", "tags", "limit"),
+        self.table = ttk.Treeview(table_panel, columns=("source", "tags", "limit", "target"),
                                  show="headings", selectmode="extended", height=9,
                                  style="DownloadRows.Treeview")
-        for column, title, width in (("source", "Source", 100), ("tags", "Search tags", 510), ("limit", "Post limit", 85)):
+        for column, title, width in (("source", "Source", 100), ("tags", "Search tags", 410), ("limit", "Post limit", 85), ("target", "Target in done", 110)):
             self.table.heading(column, text=title)
             self.table.column(column, width=width, minwidth=60, stretch=column == "tags")
         scrollbar = ttk.Scrollbar(table_panel, orient="vertical", command=self.table.yview)
@@ -72,14 +73,19 @@ class DownloaderGUI:
         self.edit_source = tk.StringVar(value="Danbooru")
         self.edit_tags = tk.StringVar()
         self.edit_limit = tk.StringVar(value="100")
+        self.edit_target = tk.StringVar()
         self.editor_widgets = [
             ttk.Combobox(editor, textvariable=self.edit_source, values=("Danbooru", "Gelbooru"), state="readonly", width=12),
             ttk.Entry(editor, textvariable=self.edit_tags),
             ttk.Entry(editor, textvariable=self.edit_limit, width=9),
+            ttk.Entry(editor, textvariable=self.edit_target, width=12),
         ]
         for column, widget in enumerate(self.editor_widgets):
             widget.grid(row=0, column=column, sticky="ew", padx=(0, 6))
-        for variable in (self.edit_source, self.edit_tags, self.edit_limit):
+        ttk.Label(frame, text="Fill gaps in the dataset: enter a target in done/ (one tag per row). Leave target blank for normal post limits. "
+                  "Gap mode ignores the post limit and downloads new images until the gap is covered or results run out. "
+                  "Enable Caption automatically to send them through to done/.", wraplength=720).pack(anchor='w')
+        for variable in (self.edit_source, self.edit_tags, self.edit_limit, self.edit_target):
             variable.trace_add("write", self.update_selected_row)
         self.row_count = tk.StringVar()
         ttk.Label(frame, textvariable=self.row_count).pack(anchor="w", pady=(3, 0))
@@ -152,7 +158,9 @@ class DownloaderGUI:
         self.batch_size.set(str(settings.get("batch_size", "50")))
         self.blacklist.set(blacklist)
         for row in rows:
-            self.add_row(row["source"], row["tags"], row["limit"])
+            identifier = self.add_row(row["source"], row["tags"], row["limit"], str(row.get("target", "")))
+            if isinstance(row.get('gap_group'), str):
+                self.rows[identifier]['gap_group'] = row['gap_group']
 
     def save_settings(self):
         settings = {"auto_caption": self.auto_caption.get(), "batch_size": self.batch_size.get(), "blacklist_separator": "spaces", "blacklist": self.blacklist.get(), "rows": list(self.rows.values())}
@@ -176,10 +184,37 @@ class DownloaderGUI:
     def update_row_count(self):
         self.row_count.set(f"{len(self.rows):,} rows • Select a row to edit below. Ctrl / Shift selects multiple rows for removal.")
 
-    def add_row(self, source_value="Danbooru", tags_value="", limit_value="100"):
-        identifier = self.table.insert("", "end", values=(source_value, tags_value, limit_value))
-        self.rows[identifier] = dict(source=source_value, tags=tags_value, limit=limit_value)
+    def add_row(self, source_value="Danbooru", tags_value="", limit_value="100", target_value=""):
+        identifier = self.table.insert("", "end", values=(source_value, tags_value, limit_value, target_value))
+        self.rows[identifier] = dict(source=source_value, tags=tags_value, limit=limit_value, target=target_value)
         return identifier
+
+    def prepare_gap_download(self, tag):
+        if self.running or self.closing:
+            messagebox.showinfo('Image downloader', 'Wait for the current downloads to finish, then choose Download more again.', parent=self.root)
+            return
+        identifiers = []
+        group = uuid.uuid4().hex
+        for source, modifier in (('Danbooru', 'order:score'), ('Gelbooru', 'sort:score')):
+            query = f'{tag} {modifier}'
+            identifier = next((key for key, row in self.rows.items() if not row['tags'].strip()), None)
+            if identifier is None:
+                identifier = self.add_row(source, query, target_value='100')
+            else:
+                self.rows[identifier].update(source=source, tags=query, target='100')
+                row = self.rows[identifier]
+                self.table.item(identifier, values=(source, query, row['limit'], '100'))
+            identifiers.append(identifier)
+            self.rows[identifier]['gap_group'] = group
+        identifier = identifiers[0]
+        self.table.selection_set(identifier)
+        self.table.see(identifier)
+        self.select_row()
+        self.auto_caption.set(True)
+        self.update_batch_controls()
+        self.update_row_count()
+        self.status.set('Set the desired total in done/, then click Start downloads.')
+        self.editor_widgets[3].focus_set()
 
     def new_row(self):
         if self.running or self.closing:
@@ -203,6 +238,7 @@ class DownloaderGUI:
             self.edit_source.set(row["source"])
             self.edit_tags.set(row["tags"])
             self.edit_limit.set(row["limit"])
+            self.edit_target.set(row.get("target", ""))
         finally:
             self.loading_editor = False
 
@@ -213,8 +249,26 @@ class DownloaderGUI:
         if not selected or selected[0] not in self.rows:
             return
         row = self.rows[selected[0]]
-        row.update(source=self.edit_source.get(), tags=self.edit_tags.get(), limit=self.edit_limit.get())
-        self.table.item(selected[0], values=(row["source"], row["tags"], row["limit"]))
+        row.update(source=self.edit_source.get(), tags=self.edit_tags.get(), limit=self.edit_limit.get(), target=self.edit_target.get())
+        self.table.item(selected[0], values=(row["source"], row["tags"], row["limit"], row["target"]))
+        # Both sources fill one dataset target; editing either must update its partner.
+        try:
+            tag = gap_tag(row['source'], row['tags']).casefold()
+        except ValueError:
+            return
+        for identifier, partner in self.rows.items():
+            if identifier == selected[0]:
+                continue
+            paired = bool(row.get('gap_group')) and row.get('gap_group') == partner.get('gap_group')
+            if not paired and not partner.get('target', '').strip():
+                continue
+            try:
+                matches = gap_tag(partner['source'], partner['tags']).casefold() == tag
+            except ValueError:
+                continue
+            if paired or matches:
+                partner['target'] = row['target']
+                self.table.item(identifier, values=(partner['source'], partner['tags'], partner['limit'], partner['target']))
 
     def remove_selected(self):
         if self.running or self.closing:
@@ -242,12 +296,18 @@ class DownloaderGUI:
             if size < 1:
                 raise ValueError()
             blacklist = parse_blacklist(self.blacklist.get())
-            jobs = [DownloadJob(row["source"], row["tags"].strip(), int(row["limit"]), blacklist)
+            jobs = [DownloadJob(row["source"], row["tags"].strip(), 100 if row.get("target", "").strip() else int(row["limit"]), blacklist,
+                                int(row["target"]) if row.get("target", "").strip() else None)
                     for row in self.rows.values()]
             if not jobs or any(not job.tags or job.limit < 1 for job in jobs):
                 raise ValueError()
+            for job in jobs:
+                if job.target_count is not None:
+                    gap_tag(job.source, job.tags)
+                    if job.target_count < 1:
+                        raise ValueError()
         except ValueError:
-            messagebox.showerror("Image downloader", "Enter tags and positive whole-number post limits and batch size.")
+            messagebox.showerror("Image downloader", "Enter tags and positive whole-number limits, targets, and batch size. Gap filling requires one positive tag per row.")
             return
         self.save_settings()
         self.caption_batches = self.auto_caption.get()
@@ -308,16 +368,18 @@ class DownloaderGUI:
                         raise caption_queue.QueueSubmissionError() from error
                 return images
 
+            gap_progress = {}
             for index, job in enumerate(jobs, 1):
                 if self.cancel.is_set():
                     break
                 self.events.put(("log", f"Row {index}: {job.source} — {job.tags}"))
                 try:
                     counts = run_job(job, images, done, known, self.cancel,
-                                     lambda count, stats: self.events.put(("status", f"Row {index}: {count}/{job.limit} checked; {stats['downloaded']} downloaded")),
+                                     lambda count, stats: self.events.put(("status", f"Row {index}: {count} checked; {stats['downloaded']} downloaded")),
                                      log=lambda message: self.events.put(("log", f"Row {index}: {message}")),
                                      on_download=received if self.caption_batches else None,
-                                     destination=destination if self.caption_batches else None)
+                                     destination=destination if self.caption_batches else None,
+                                     **({'gap_progress': gap_progress} if job.target_count is not None else {}))
                     self.events.put(("log", f"Row {index}: " + ", ".join(f"{value} {key}" for key, value in counts.items())))
                     had_errors = had_errors or bool(counts["failed"])
                 except Exception as error:

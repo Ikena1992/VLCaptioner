@@ -27,7 +27,9 @@ IMAGE_EXTENSIONS = (
     ".webp",
     ".gif",
     ".bmp",
+    ".tif",
     ".tiff",
+    ".avif",
 )
 
 INTERMEDIATE_EXTENSIONS = (
@@ -44,7 +46,7 @@ def normalize_output_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def publish_files(sources, generated):
+def publish_files(sources, generated, review_issues=()):
     """Check a staged set, then publish directly to its final folder."""
     stage = Path(tempfile.mkdtemp(prefix=".finalize-", dir=DONE_DIR))
     installed = []
@@ -57,7 +59,7 @@ def publish_files(sources, generated):
             (stage / name).write_text(text + "\n", encoding="utf-8")
         names = [p.name for p in sources]
         names.extend(name for name in generated if name not in names)
-        issues = quality_issues([stage / name for name in names])
+        issues = list(review_issues) + quality_issues([stage / name for name in names])
         destination = REVIEW_DIR if issues else DONE_DIR
         destination.mkdir(parents=True, exist_ok=True)
         for name in names:
@@ -100,8 +102,9 @@ def finish_cleanup(stage):
     names = sources if isinstance(record, list) else record["names"]
     if destination not in (DONE_DIR, REVIEW_DIR):
         raise RuntimeError(f"Invalid finalization destination: {stage}")
-    for name in names:
-        if Path(name).name != name or not (destination / name).is_file():
+    for name in [*names, *sources]:
+        if (not isinstance(name, str) or name in ("", ".", "..")
+                or Path(name).name != name or not (destination / name).is_file()):
             raise RuntimeError(f"Invalid or incomplete finalization journal: {stage}")
     for name in sources:
         (IMAGES_DIR / name).unlink(missing_ok=True)
@@ -110,7 +113,7 @@ def finish_cleanup(stage):
     other = REVIEW_DIR if destination == DONE_DIR else DONE_DIR
     stems = {Path(name).stem for name in names}
     for stem in stems:
-        for extension in set(IMAGE_EXTENSIONS) | {".short", ".long", ".tag", ".combined", ".txt"}:
+        for extension in set(IMAGE_EXTENSIONS) | {".short", ".long", ".tag", ".combined", ".txt", ".review.json"}:
             (other / f"{stem}{extension}").unlink(missing_ok=True)
     shutil.rmtree(stage)
 

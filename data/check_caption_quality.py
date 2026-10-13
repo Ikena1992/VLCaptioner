@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+from collections import Counter
 from pathlib import Path
 
 from tqdm import tqdm
@@ -17,9 +18,41 @@ MAX_SCAN_CHARS = 200_000
 WORD_RE = re.compile(r"\b[^\W_]+(?:['’-][^\W_]+)*\b", re.UNICODE)
 SENTENCE_BREAK_RE = re.compile(r"[.!?]+(?:[\"')\]]+)?\s+")
 CONTROL_MARKER_RE = re.compile(
-    r"END_CAPTION|</?(?:think|torii_report|ground_truth_tags|long_caption|format)>",
+    r"END_CAPTION|</?(?:think|torii_report|ground_truth_tags|long_caption|format)>"
+    r"|<\|(?:im_start|im_end|endoftext|eot_id|start_header_id|end_header_id)\|>",
     re.IGNORECASE,
 )
+RESPONSE_PREFIX_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?(?:(?:short|long|detailed)\s+)?"
+    r"(?:caption|description)\s*:\s*|"
+    r"^\s*Here (?:is|are) (?:the|your|a) "
+    r"(?:(?:short|long|detailed)\s+)?caption(?:s)?\s*:",
+    re.IGNORECASE,
+)
+
+
+def repetition_issue(caption: str) -> str | None:
+    # Visible quoted writing can legitimately repeat. Exclude it from loop checks.
+    prose = re.sub(r'"[^"\n]*"|“[^”\n]*”', ' ', caption)
+    sentences = [tuple(word.casefold() for word in WORD_RE.findall(part))
+                 for part in SENTENCE_BREAK_RE.split(prose)]
+    total_words = sum(map(len, sentences))
+    for sentence, count in Counter(sentences).items():
+        if len(sentence) >= 8 and count >= 3 and len(sentence) * count >= total_words / 2:
+            return "repeats the same substantial sentence at least three times"
+    words = [word.casefold() for word in WORD_RE.findall(prose)]
+    for width in range(1, 9):
+        required = max(5, (24 + width - 1) // width)
+        run = 1
+        for index in range(width, len(words) - width + 1):
+            if words[index:index + width] == words[index - width:index]:
+                run += 1
+                # Each match moves one word; width consecutive matches add one copy.
+                if run >= (required - 1) * width + 1:
+                    return "contains a sustained consecutive word or phrase loop"
+            else:
+                run = 1
+    return None
 
 
 def longest_sentence_words(text: str) -> int:
@@ -32,6 +65,26 @@ def longest_sentence_words(text: str) -> int:
 def is_runaway_caption(text: str, max_sentence_words: int = 250) -> bool:
     """Detect the very long punctuation-free chains produced by model degeneration."""
     return longest_sentence_words(text) > max_sentence_words
+
+
+def caption_text_issues(caption: str, suffix: str, max_sentence_words: int = 250) -> list[str]:
+    """Shared checks for generated, cached, and published captions."""
+    if not caption.strip():
+        return [f"{suffix} caption empty"]
+    issues = []
+    marker = CONTROL_MARKER_RE.search(caption)
+    if marker:
+        issues.append(f"{suffix} contains control text ({marker.group()})")
+    if RESPONSE_PREFIX_RE.search(caption):
+        issues.append(f"{suffix} starts with a response heading or preamble")
+    repetition = repetition_issue(caption[:MAX_SCAN_CHARS])
+    if repetition:
+        issues.append(f"{suffix} {repetition}")
+    if len(caption) > MAX_SCAN_CHARS:
+        issues.append(f"{suffix} caption exceeds scan limit")
+    elif is_runaway_caption(caption, max_sentence_words):
+        issues.append(f"{suffix} has a {longest_sentence_words(caption)}-word sentence")
+    return issues
 
 
 def quality_issues(files: list[Path], max_sentence_words: int = 250) -> list[str]:
@@ -47,19 +100,7 @@ def quality_issues(files: list[Path], max_sentence_words: int = 250) -> list[str
             continue
         with path.open(encoding="utf-8-sig", errors="replace") as caption_file:
             caption = caption_file.read(MAX_SCAN_CHARS + 1)
-        if not caption.strip():
-            issues.append(f"{suffix} caption empty")
-            continue
-        marker = CONTROL_MARKER_RE.search(caption)
-        if marker:
-            issues.append(f"{suffix} contains control text ({marker.group()})")
-        if suffix == ".long":
-            if len(caption) > MAX_SCAN_CHARS:
-                issues.append(".long caption exceeds scan limit")
-            elif is_runaway_caption(caption, max_sentence_words):
-                issues.append(
-                    f".long has a {longest_sentence_words(caption)}-word sentence"
-                )
+        issues.extend(caption_text_issues(caption, suffix, max_sentence_words))
     return issues
 
 
