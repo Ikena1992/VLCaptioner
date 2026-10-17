@@ -65,7 +65,9 @@ Both installers create the Python environment in `data/env`.
 ### 2. Configure Ollama and API access
 
 Start Ollama on the computer that will run the vision models. Edit `config.txt`
-and replace the Danbooru placeholders with your credentials. Keep this file private.
+and replace the Danbooru placeholders with your credentials. If you use Gelbooru,
+also fill in `GELBOORU_USER_ID` and `GELBOORU_API_KEY` with your Gelbooru credentials.
+Keep this file private.
 For a remote server, change `OLLAMA_URL` to its private network address.
 
 | Setting | Default / value to supply |
@@ -75,6 +77,8 @@ For a remote server, change `OLLAMA_URL` to its private network address.
 | `OLLAMA_MODEL` | `orcarouter/Qwen3.8-27B-Uncensored:q4_K_M` |
 | `DANBOORU_LOGIN` | Your Danbooru login |
 | `DANBOORU_API_KEY` | Your Danbooru API key |
+| `GELBOORU_USER_ID` | Your numeric Gelbooru user ID, if using Gelbooru |
+| `GELBOORU_API_KEY` | Your Gelbooru API key, if using Gelbooru |
 
 VLCaptioner asks Ollama to download missing models when captioning starts.
 The first run can take longer; model downloads and inference happen on the Ollama
