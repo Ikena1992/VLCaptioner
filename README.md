@@ -14,8 +14,8 @@ AnimeTimm/WD14 tagging runs on the computer running VLCaptioner.
 - **Review results:** keep completed sets in `done/` and flagged sets in
   `captionReview/`; optionally generate layout JSON sidecars.
 
-[Quick start](#quick-start) Ã‚Â· [Workflow](#workflow) Ã‚Â· [Options](#options) Ã‚Â·
-[Outputs](#output-files) Ã‚Â· [Tools](#tools) Ã‚Â· [Help](#troubleshooting)
+[Quick start](#quick-start) · [Workflow](#workflow) · [Options](#options) ·
+[Outputs](#output-files) · [Tools](#tools) · [Help](#troubleshooting)
 
 <p>
   <a href="docs/images/caption-options.jpg"><img src="docs/images/caption-options.jpg" width="320" alt="Current VLCaptioner caption options, including refiner thinking, layout JSON, and caption cache controls"></a>
@@ -87,7 +87,7 @@ Launch the GUI from the project folder:
 | `.\GUI.cmd` | `bash GUI.sh` |
 
 1. Review **1. Check setup** for API and Ollama readiness.
-2. Use **2. Download images (optional)** Ã¢â€ â€™ **Open image downloader**, or add
+2. Use **2. Download images (optional)** → **Open image downloader**, or add
    images directly to `images/`. Subfolders are not processed by the captioner.
 3. For a simple first test, add `sample.webp` and a matching `sample.txt`
    containing tags such as `1girl, blue_hair, outdoors`.
@@ -97,7 +97,7 @@ Launch the GUI from the project folder:
 
 **Use copies of your originals.** Conversion replaces non-WebP inputs with WebP;
 finalization moves processed sets out of `images/`. Non-WebP images are resized
-to fit within 3000 Ãƒâ€” 3000 pixels and transparency is flattened onto white.
+to fit within 3000 × 3000 pixels and transparency is flattened onto white.
 Existing WebP files are left unchanged by conversion. Supported inputs:
 `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tiff`, `.gif`, `.webp`; animations are not preserved.
 Use unique base filenames to avoid image and companion-file conflicts.
@@ -116,10 +116,10 @@ and failures return `1`.
 ## Workflow
 
 ```text
-images/ Ã¢â€ â€™ conversion Ã¢â€ â€™ source tags + metadata Ã¢â€ â€™ Torii analysis Ã¢â€ â€™ refinement
-                                                             Ã¢â€ â€œ
+images/ → conversion → source tags + metadata → Torii analysis → refinement
+                                                             ↓
                                                    caption quality check
-                                                   Ã¢â€ â„¢                  Ã¢â€ Ëœ
+                                                   ↙                  ↘
                                                 done/           captionReview/
 ```
 
@@ -209,7 +209,7 @@ Select **Open dataset manager**, choose folders, and click **Scan selected**.
 Filter tag counts by category or dataset, preview matching images, and export
 statistics as CSV. Scanning does not modify dataset files.
 
-Use **Download moreÃ¢â‚¬Â¦** on selected tags to prepare searches. Set **Target in done**
+Use **Download more…** on selected tags to prepare searches. Set **Target in done**
 to fill a dataset toward a desired count; leave it blank for ordinary downloads.
 
 ### Copy, move, and export
