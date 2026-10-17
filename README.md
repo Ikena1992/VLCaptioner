@@ -17,6 +17,8 @@ AnimeTimm/WD14 tagging runs on the computer running VLCaptioner.
 [Quick start](#quick-start) · [Workflow](#workflow) · [Options](#options) ·
 [Outputs](#output-files) · [Tools](#tools) · [Help](#troubleshooting)
 
+[![VLCaptioner caption options alongside the Layout JSON Viewer showing detected image regions and scene details](docs/images/layout-viewer-preview.png)](docs/images/layout-viewer-preview.png)
+
 <p>
   <a href="docs/images/caption-options.jpg"><img src="docs/images/caption-options.jpg" width="320" alt="Current VLCaptioner caption options, including refiner thinking, layout JSON, and caption cache controls"></a>
   <a href="docs/images/tag-options.jpg"><img src="docs/images/tag-options.jpg" width="320" alt="Current VLCaptioner tag options, including missing tags, booru tag replacement, upload year, and series tags"></a>
