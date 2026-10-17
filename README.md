@@ -5,6 +5,9 @@ captions, detailed captions, and Danbooru-style tags. It uses ToriiGate to
 analyze images and a second Ollama vision model to refine the captions.
 Finished images and text files are saved in `done/`.
 
+It is primarily designed for datasets from **Danbooru and Gelbooru**, using
+their tags and metadata to guide caption generation.
+
 Ollama can run locally or on another computer on your network. Optional
 AnimeTimm/WD14 tagging runs on the computer running VLCaptioner.
 
