@@ -45,30 +45,13 @@ rem Parse the whole update block before Git can replace this script.
         exit /b 1
     )
 
-    git diff --quiet --ignore-submodules=none --
-    if errorlevel 1 (
-        echo ERROR: Tracked files have local changes. Commit or stash them before updating.
-        git status --short
-        popd
-        if defined VLCAPTIONER_UPDATE_PAUSE pause
-        exit /b 1
-    )
-
-    git diff --cached --quiet --ignore-submodules=none --
-    if errorlevel 1 (
-        echo ERROR: Staged changes exist. Commit or stash them before updating.
-        git status --short
-        popd
-        if defined VLCAPTIONER_UPDATE_PAUSE pause
-        exit /b 1
-    )
-
+    rem Let Git preserve local changes and reject only changes that block the update.
     echo Pulling the current branch from its configured upstream...
     git -c merge.autostash=false -c rebase.autostash=false pull --ff-only --no-rebase
     if errorlevel 1 (
         echo.
         echo ERROR: Update failed. Review the Git message above.
-        echo Check network access, conflicting untracked files, or diverged branch history.
+        echo Check network access, local changes to incoming files, conflicting untracked files, or diverged branch history.
         echo This updater does not reset, stash, or resolve conflicts automatically.
         popd
         if defined VLCAPTIONER_UPDATE_PAUSE pause

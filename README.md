@@ -114,7 +114,8 @@ Use unique base filenames to avoid image and companion-file conflicts.
 ## Updating
 
 Close VLCaptioner and run `update.cmd` on Windows. It updates the current branch
-from its configured upstream using a fast-forward pull. Local tracked changes,
+from its configured upstream using a fast-forward pull. Local changes are preserved
+when they do not interfere with incoming updates. Changes that would be overwritten,
 a detached checkout, or diverged history stop the update with an explanation.
 The updater does not reset or stash your work. Ignored configuration, datasets,
 and caches stay local. If dependencies changed, rerun `install.bat`.
