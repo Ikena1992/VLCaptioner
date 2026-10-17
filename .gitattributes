@@ -1,0 +1,14 @@
+# Keep source portable while retaining native Windows launcher endings.
+* text=auto
+*.py text eol=lf
+*.pyw text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.gif binary
+*.sqlite3 binary

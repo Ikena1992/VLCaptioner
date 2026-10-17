@@ -15,3 +15,7 @@ DANBOORU_USER_AGENT=VLCaptioner/1.0 (your-login)
 # Gelbooru may require these credentials for API access.
 GELBOORU_USER_ID=
 GELBOORU_API_KEY=
+
+# Refiner options (also apply to automatically queued batches)
+REFINER_THINKING=false
+REFINER_JSON=false

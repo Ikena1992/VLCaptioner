@@ -24,11 +24,17 @@ class OllamaClient:
         self._encoded_image = None
 
     @staticmethod
+    def inference_image(path: Path, max_size=(1024, 1024)) -> Image.Image:
+        """Return the oriented RGB preview used for inference, without cropping."""
+        with Image.open(path) as source:
+            image = ImageOps.exif_transpose(source).convert("RGB")
+            image.thumbnail(max_size)
+            return image
+
+    @staticmethod
     def image_to_base64(path: Path, max_size=(1024, 1024)) -> str:
         """Encode a resized inference copy as RGB JPEG; preserve the source file."""
-        with Image.open(path) as image:
-            image = ImageOps.exif_transpose(image).convert("RGB")
-            image.thumbnail(max_size)
+        with OllamaClient.inference_image(path, max_size) as image:
             buffer = io.BytesIO()
             image.save(buffer, format="JPEG", quality=95)
         return base64.b64encode(buffer.getvalue()).decode("ascii")
@@ -139,6 +145,8 @@ class OllamaClient:
         image_path: Path | None,
         options: dict,
         system_prompt: str | None = None,
+        think: bool = False,
+        response_format: str | dict | None = None,
     ) -> tuple[str, dict]:
         messages = []
         if system_prompt:
@@ -153,7 +161,8 @@ class OllamaClient:
                 json={
                     "model": model,
                     "stream": False,
-                    "think": False,
+                    "think": think,
+                    **({"format": response_format} if response_format is not None else {}),
                     "messages": messages,
                     "options": options,
                 },
@@ -173,8 +182,15 @@ class OllamaClient:
         except requests.RequestException as error:
             raise RuntimeError(f"Ollama request failed: {error}") from error
         payload = response.json()
-        text = payload.get("message", {}).get("content", "").strip()
-        if not text and payload.get("done_reason") != "length":
+        if not isinstance(payload, dict):
+            raise RuntimeError("Ollama returned an invalid response object")
+        if payload.get("error"):
+            raise RuntimeError(f"Ollama returned an error: {payload['error']}")
+        message = payload.get("message", {})
+        if not isinstance(message, dict) or not isinstance(message.get("content", ""), str):
+            raise RuntimeError("Ollama returned invalid message content")
+        text = message.get("content", "").strip()
+        if not text and payload.get("done_reason") != "length" and not (think and message.get("thinking")):
             raise RuntimeError(
                 "Ollama returned an empty response "
                 f"(done_reason={payload.get('done_reason', 'unknown')})"

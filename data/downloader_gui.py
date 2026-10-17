@@ -46,7 +46,7 @@ def download_job_from_row(row, blacklist):
 class DownloaderGUI:
     def __init__(self, root, settings_file=SETTINGS_FILE, can_start=None):
         self.root = root
-        self.settings_file = settings_file
+        self.settings_file = Path(settings_file)
         self.can_start = can_start or (lambda automatic: True)
         self.rows = {}
         self.loading_editor = False
@@ -57,43 +57,56 @@ class DownloaderGUI:
         self.poll_job = None
         self.close_job = None
         root.title("VLCaptioner — Image downloader")
-        root.geometry("880x860")
-        root.minsize(760, 840)
-        frame = ttk.Frame(root, padding=16)
+        root.geometry("1040x820")
+        root.minsize(860, 680)
+        frame = ttk.Frame(root, padding=18)
         frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text="Download original images", font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        ttk.Label(frame, text="Save originals + TXT/CSV tags to images/ • Skip MD5 filenames in images/, done/, and done1/").pack(anchor="w", pady=(4, 12))
-        ttk.Label(frame, text="Search tags: separate tags with spaces; keep underscores within a tag (example: blue_eyes long_hair).",
-                  wraplength=720, justify="left").pack(anchor="w")
-        ttk.Label(frame, text="Post limit = posts checked, including blacklisted posts, images already in images/, done/, or done1/, "
-                  "unavailable files, and failed downloads. A limit of 100 can download fewer than 100 images.",
-                  wraplength=720, justify="left").pack(anchor="w", pady=(4, 0))
-        ttk.Label(frame, text="Tag blacklist — applies to all rows", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(10, 2))
-        self.blacklist = tk.StringVar()
-        self.blacklist_entry = ttk.Entry(frame, textvariable=self.blacklist)
-        self.blacklist_entry.pack(fill="x")
-        ttk.Label(frame, text="Separate blacklist tags with spaces, just like search tags (example: tall_image watermark comic). "
-                  "Keep underscores: tall_image matches; tall image does not. Any matching tag skips the image. "
-                  "Whole tags only; letter case and extra spaces are ignored. Leave blank to allow all tags.",
-                  wraplength=720, justify="left").pack(anchor="w", pady=(4, 4))
-        table_panel = ttk.Frame(frame)
-        table_panel.pack(fill="both", expand=True, pady=8)
+        header = ttk.Frame(frame)
+        header.pack(fill="x", pady=(0, 14))
+        ttk.Label(header, text="Image downloader", font=("Segoe UI", 21, "bold")).pack(anchor="w")
+        ttk.Label(header, text="Queue searches from Danbooru and Gelbooru. Originals and tags are saved to images/.",
+                  bootstyle="secondary", wraplength=800).pack(anchor="w", pady=(4, 0))
+
+        notebook = ttk.Notebook(frame)
+        notebook.pack(fill="both", expand=True)
+        search_page = ttk.Frame(notebook, padding=12)
+        settings_page = ttk.Frame(notebook, padding=12)
+        notebook.add(search_page, text="Search queue")
+        notebook.add(settings_page, text="Filters & captioning")
+        self.search_notebook = notebook
+        self.search_page = search_page
+        self.settings_page = settings_page
+
+        row_tools = ttk.Frame(search_page)
+        row_tools.pack(fill="x", pady=(0, 8))
+        self.add_button = ttk.Button(row_tools, text="Add search", command=self.new_row, bootstyle="primary")
+        self.add_button.pack(side="left")
+        self.remove_button = ttk.Button(row_tools, text="Remove selected", command=self.remove_selected, bootstyle="secondary-outline")
+        self.remove_button.pack(side="left", padx=8)
+        self.row_count = tk.StringVar()
+        ttk.Label(row_tools, textvariable=self.row_count, bootstyle="secondary").pack(side="right")
+        table_panel = ttk.Frame(search_page)
+        table_panel.pack(fill="both", expand=True)
+        table_panel.rowconfigure(0, weight=1)
+        table_panel.columnconfigure(0, weight=1)
         ttk.Style().configure("DownloadRows.Treeview",
-                              rowheight=max(22, tkfont.nametofont("TkDefaultFont").metrics("linespace") + 4))
+                              rowheight=max(30, tkfont.nametofont("TkDefaultFont").metrics("linespace") + 10))
         self.table = ttk.Treeview(table_panel, columns=("source", "tags", "limit", "target"),
-                                 show="headings", selectmode="extended", height=9,
+                                 show="headings", selectmode="extended", height=7,
                                  style="DownloadRows.Treeview")
-        for column, title, width in (("source", "Source", 100), ("tags", "Search tags", 410), ("limit", "Post limit", 85), ("target", "Target in done", 110)):
+        for column, title, width in (("source", "Source", 110), ("tags", "Search tags", 430), ("limit", "Post limit", 100), ("target", "Target in done", 120)):
             self.table.heading(column, text=title)
-            self.table.column(column, width=width, minwidth=60, stretch=column == "tags")
+            self.table.column(column, width=width, minwidth=80, stretch=column == "tags")
+        self.table.grid(row=0, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(table_panel, orient="vertical", command=self.table.yview)
-        self.table.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        self.table.pack(fill="both", expand=True)
+        horizontal = ttk.Scrollbar(table_panel, orient="horizontal", command=self.table.xview)
+        self.table.configure(yscrollcommand=scrollbar.set, xscrollcommand=horizontal.set)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        horizontal.grid(row=1, column=0, sticky="ew")
         self.table.bind("<<TreeviewSelect>>", self.select_row)
         self.table.bind("<Delete>", lambda event: self.remove_selected())
-        editor = ttk.Frame(frame)
-        editor.pack(fill="x")
+        editor = ttk.Labelframe(search_page, text="Edit selected search", padding=10)
+        editor.pack(fill="x", pady=(10, 0))
         editor.columnconfigure(1, weight=1)
         self.edit_source = tk.StringVar(value="Danbooru")
         self.edit_tags = tk.StringVar()
@@ -105,57 +118,76 @@ class DownloaderGUI:
             ttk.Entry(editor, textvariable=self.edit_limit, width=9),
             ttk.Entry(editor, textvariable=self.edit_target, width=12),
         ]
-        for column, widget in enumerate(self.editor_widgets):
-            widget.grid(row=0, column=column, sticky="ew", padx=(0, 6))
-        ttk.Label(frame, text="Fill gaps in the dataset: set Target in done separately for each row (one tag per row). Counts include done/ and done1/ when available. Leave target blank for normal post limits. "
-                  "Gap mode ignores the post limit and downloads new images until the gap is covered or results run out. "
-                  "Enable Caption automatically to send them through to done/.", wraplength=720).pack(anchor='w')
+        for column, (title, widget) in enumerate(zip(("Source", "Search tags", "Post limit", "Target in done"), self.editor_widgets)):
+            ttk.Label(editor, text=title, bootstyle="secondary").grid(row=0, column=column, sticky="w", padx=(0, 8), pady=(0, 4))
+            widget.grid(row=1, column=column, sticky="ew", padx=(0, 8))
+        self.editor_hint = tk.StringVar(value="Select one search to edit. Changes are saved immediately to the row.")
+        ttk.Label(editor, textvariable=self.editor_hint, bootstyle="secondary", wraplength=760).grid(
+            row=2, column=0, columnspan=4, sticky="w", pady=(8, 0))
         for variable in (self.edit_source, self.edit_tags, self.edit_limit, self.edit_target):
             variable.trace_add("write", self.update_selected_row)
-        self.row_count = tk.StringVar()
-        ttk.Label(frame, textvariable=self.row_count).pack(anchor="w", pady=(3, 0))
-        batching = ttk.Frame(frame)
-        batching.pack(fill="x", pady=8)
+        ttk.Label(search_page, text="Use spaces between tags and underscores within tags, e.g. blue_eyes long_hair. Ctrl / Shift selects multiple searches for removal.",
+                  bootstyle="secondary", wraplength=800).pack(anchor="w", pady=(8, 0))
+
+        filters = ttk.Labelframe(settings_page, text="Tag blacklist", padding=12)
+        filters.pack(fill="x", pady=(0, 12))
+        self.blacklist = tk.StringVar()
+        self.blacklist_entry = ttk.Entry(filters, textvariable=self.blacklist)
+        self.blacklist_entry.pack(fill="x")
+        ttk.Label(filters, text="Applies to every search. Separate whole tags with spaces, e.g. tall_image watermark comic. Any matching tag skips the image. Leave blank to allow all tags.",
+                  wraplength=780, bootstyle="secondary").pack(anchor="w", pady=(8, 0))
+        batching = ttk.Labelframe(settings_page, text="Automatic captioning", padding=12)
+        batching.pack(fill="x", pady=(0, 12))
         self.auto_caption = tk.BooleanVar(value=False)
         self.batch_size = tk.StringVar(value="50")
-        self.caption_toggle = ttk.Checkbutton(batching, text="Caption automatically", variable=self.auto_caption, command=self.update_batch_controls)
-        self.caption_toggle.pack(side="left")
-        ttk.Label(batching, text="Images per batch").pack(side="left", padx=(18, 6))
-        self.batch_entry = ttk.Entry(batching, textvariable=self.batch_size, width=7, state="disabled")
+        self.caption_toggle = ttk.Checkbutton(batching, text="Caption downloaded images automatically", variable=self.auto_caption,
+                                              command=self.update_batch_controls, bootstyle="primary-round-toggle")
+        self.caption_toggle.pack(anchor="w")
+        batch_row = ttk.Frame(batching)
+        batch_row.pack(fill="x", pady=10)
+        ttk.Label(batch_row, text="Images per batch").pack(side="left", padx=(0, 8))
+        self.batch_entry = ttk.Entry(batch_row, textvariable=self.batch_size, width=7, state="disabled")
         self.batch_entry.pack(side="left")
-        ttk.Label(frame, text="Caption automatically: caption downloaded images in batches while downloads continue.",
-                  wraplength=720, justify="left").pack(anchor="w")
-        ttk.Label(frame, text="Batch size: larger = fewer model switches; smaller = earlier results. Leftover images form the last batch.",
-                  wraplength=720, justify="left").pack(anchor="w", pady=(4, 4))
-        ttk.Label(frame, text="Keep the Caption GUI open. Settings: Options tab. Batch progress: Queue tab.",
-                  wraplength=720, justify="left").pack(anchor="w")
+        ttk.Label(batching, text="Smaller batches give earlier results; larger batches reduce model switches. Leftover images form the final batch. Keep the Caption GUI open; use Options for caption settings and Queue for progress.",
+                  wraplength=780, bootstyle="secondary").pack(anchor="w")
+        help_panel = ttk.Labelframe(settings_page, text="How download limits work", padding=12)
+        help_panel.pack(fill="x")
+        ttk.Label(help_panel, text="Post limit counts posts checked, including duplicates, blacklisted posts, missing files and failures. Checking 100 posts may download fewer than 100 images. Existing MD5 filenames in images/, done/ and done1/ are skipped.",
+                  wraplength=780, justify="left").pack(anchor="w")
+        ttk.Label(help_panel, text="Target in done fills a dataset gap for a single tag. It counts done/ and done1/, ignores the post limit, and downloads until the gap is covered or results run out. Leave the target blank for normal downloads. Enable automatic captioning to send downloads through to done/.",
+                  wraplength=780, justify="left").pack(anchor="w", pady=(10, 0))
+
         controls = ttk.Frame(frame)
-        controls.pack(fill="x", pady=8)
-        self.add_button = ttk.Button(controls, text="Add row", command=self.new_row)
-        self.add_button.pack(side="left")
-        self.remove_button = ttk.Button(controls, text="Remove selected", command=self.remove_selected)
-        self.remove_button.pack(side="left", padx=(8, 0))
+        controls.pack(fill="x", pady=(12, 8))
         self.start_button = ttk.Button(controls, text="Start downloads", command=self.start, bootstyle="success")
-        self.start_button.pack(side="left", padx=8)
+        self.start_button.pack(side="left")
         self.stop_button = ttk.Button(controls, text="Stop", command=self.stop, state="disabled", bootstyle="danger-outline")
-        self.stop_button.pack(side="left")
+        self.stop_button.pack(side="left", padx=8)
         self.status = tk.StringVar(value="Ready")
-        ttk.Label(controls, textvariable=self.status).pack(side="right")
-        self.log = scrolledtext.ScrolledText(frame, height=8, state="disabled", wrap="word")
+        ttk.Label(controls, textvariable=self.status, wraplength=650).pack(side="left", padx=8, fill="x", expand=True)
+        activity = ttk.Labelframe(frame, text="Activity", padding=8)
+        activity.pack(fill="both", pady=(0, 4))
+        self.log = scrolledtext.ScrolledText(activity, height=6, state="disabled", wrap="word", relief="flat", font=("Consolas", 9))
         self.log.pack(fill="both", expand=True)
-        ttk.Label(frame, text="Rows and blacklist are remembered on close. Reopening restores settings; downloads start only when you click Start downloads.",
-                  wraplength=720, justify="left").pack(anchor="w", pady=(8, 0))
+        self.apply_theme()
+        ttk.Label(frame, text="Searches and settings are remembered. Downloads start only when you click Start downloads.",
+                  bootstyle="secondary", wraplength=900).pack(anchor="w", pady=(4, 0))
         self.restore_settings()
         self.update_batch_controls()
         if self.rows:
             self.table.selection_set(next(iter(self.rows)))
-            self.select_row()
+        self.select_row()
         self.update_row_count()
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.poll_job = root.after(100, self.poll)
 
     def update_batch_controls(self):
         self.batch_entry.configure(state="normal" if self.auto_caption.get() and not self.running else "disabled")
+
+    def apply_theme(self):
+        colors = ttk.Style().colors
+        self.log.configure(background=colors.inputbg, foreground=colors.inputfg,
+                           insertbackground=colors.inputfg)
 
     def restore_settings(self):
         try:
@@ -207,7 +239,7 @@ class DownloaderGUI:
                     pass  # Cleanup failure must not prevent the window closing.
 
     def update_row_count(self):
-        self.row_count.set(f"{len(self.rows):,} rows • Select a row to edit below. Ctrl / Shift selects multiple rows for removal.")
+        self.row_count.set(f"{len(self.rows):,} searches")
 
     def add_row(self, source_value="Danbooru", tags_value="", limit_value="100", target_value=""):
         identifier = self.table.insert("", "end", values=(source_value, tags_value, limit_value, target_value))
@@ -218,6 +250,7 @@ class DownloaderGUI:
         if self.running or self.closing:
             messagebox.showinfo('Image downloader', 'Wait for the current downloads to finish, then choose Download more again.', parent=self.root)
             return
+        self.search_notebook.select(self.search_page)
         identifiers = []
         group = uuid.uuid4().hex
         for source, modifier, target in (('Danbooru', 'order:score', '200'), ('Gelbooru', 'sort:score', '250')):
@@ -253,29 +286,35 @@ class DownloaderGUI:
 
     def select_row(self, event=None):
         selected = self.table.selection()
-        if not selected:
-            return
-        row = self.rows.get(selected[0])
-        if row is None:
-            return
+        row = self.rows.get(selected[0]) if len(selected) == 1 else None
         self.loading_editor = True
         try:
-            self.edit_source.set(row["source"])
-            self.edit_tags.set(row["tags"])
-            self.edit_limit.set(row["limit"])
-            self.edit_target.set(row.get("target", ""))
+            self.edit_source.set(row["source"] if row else "Danbooru")
+            self.edit_tags.set(row["tags"] if row else "")
+            self.edit_limit.set(row["limit"] if row else "")
+            self.edit_target.set(row.get("target", "") if row else "")
         finally:
             self.loading_editor = False
+        if not row:
+            self.editor_hint.set("Select one search to edit." if not selected else
+                                 f"{len(selected):,} searches selected. Choose one to edit, or remove the selection.")
+        else:
+            self.editor_hint.set("Target mode: post limit is ignored. Counts completed images in done/ and done1/." if self.edit_target.get().strip() else
+                                 "Changes update this row immediately. Leave Target in done blank to use the post limit.")
+        self.set_row_controls(not self.running and not self.closing)
 
     def update_selected_row(self, *args):
         if self.loading_editor or self.running or self.closing:
             return
         selected = self.table.selection()
-        if not selected or selected[0] not in self.rows:
+        if len(selected) != 1 or selected[0] not in self.rows:
             return
         row = self.rows[selected[0]]
         row.update(source=self.edit_source.get(), tags=self.edit_tags.get(), limit=self.edit_limit.get(), target=self.edit_target.get())
         self.table.item(selected[0], values=(row["source"], row["tags"], row["limit"], row["target"]))
+        self.editor_hint.set("Target mode: post limit is ignored. Counts completed images in done/ and done1/." if row["target"].strip() else
+                             "Changes update this row immediately. Leave Target in done blank to use the post limit.")
+        self.set_row_controls(True)
 
     def remove_selected(self):
         if self.running or self.closing:
@@ -285,12 +324,18 @@ class DownloaderGUI:
             self.rows.pop(identifier, None)
         if selected:
             self.table.delete(*selected)
+            if self.rows:
+                self.table.selection_set(next(iter(self.rows)))
+        self.select_row()
         self.update_row_count()
 
     def set_row_controls(self, enabled):
-        self.remove_button.configure(state="normal" if enabled else "disabled")
+        selected = self.table.selection()
+        self.remove_button.configure(state="normal" if enabled and selected else "disabled")
+        editable = enabled and len(selected) == 1
         for index, widget in enumerate(self.editor_widgets):
-            widget.configure(state=("readonly" if index == 0 else "normal") if enabled else "disabled")
+            active = editable and not (index == 2 and self.edit_target.get().strip())
+            widget.configure(state=("readonly" if index == 0 else "normal") if active else "disabled")
 
     def start(self):
         if self.running or self.closing:
@@ -303,6 +348,8 @@ class DownloaderGUI:
             if size < 1:
                 raise ValueError()
         except ValueError:
+            self.search_notebook.select(self.settings_page)
+            self.batch_entry.focus_set()
             messagebox.showerror('Image downloader', 'Images per batch must be a positive whole number.', parent=self.root)
             return
         blacklist = parse_blacklist(self.blacklist.get())
@@ -311,6 +358,7 @@ class DownloaderGUI:
             try:
                 jobs.append(download_job_from_row(row, blacklist))
             except ValueError as error:
+                self.search_notebook.select(self.search_page)
                 self.table.selection_set(identifier)
                 self.table.see(identifier)
                 self.select_row()
@@ -435,12 +483,14 @@ class DownloaderGUI:
             for _ in range(200):
                 kind, value = self.events.get_nowait()
                 if kind == "log":
+                    follow = self.log.yview()[1] >= 0.99
                     self.log.configure(state="normal")
                     self.log.insert("end", value + "\n")
                     line_count = int(self.log.index("end-1c").split(".")[0])
                     if line_count > 3000:
                         self.log.delete("1.0", f"{line_count - 3000 + 1}.0")
-                    self.log.see("end")
+                    if follow:
+                        self.log.see("end")
                     self.log.configure(state="disabled")
                 else:
                     self.status.set(value)

@@ -33,7 +33,7 @@ STAGES = (
 
 def stage_description(stage, overwrite_danbooru_txt=False, skip_wd14_high_confidence=False,
                       overwrite_caption_cache=False, overwrite_caption_files=False,
-                      add_year_tag=False, add_copyright_tags=False):
+                      add_year_tag=False, add_copyright_tags=False, refiner_thinking=None, refiner_json=None):
     if stage.script == "fetch_danbooru_tags.py":
         return "Replace existing source tags from matching posts" if overwrite_danbooru_txt else "Fetch source tags only for images without tags"
     if stage.script == "tag_images_with_wd14.py":
@@ -41,6 +41,10 @@ def stage_description(stage, overwrite_danbooru_txt=False, skip_wd14_high_confid
     if stage.script == "generate_gemma_captions.py":
         text = "Replace caption files" if overwrite_caption_files else "Keep existing caption files"
         text += "; bypass refinement cache" if overwrite_caption_cache else "; reuse refinement cache"
+        if refiner_thinking:
+            text += "; thinking enabled"
+        if refiner_json:
+            text += "; regenerate JSON sidecars" if overwrite_caption_cache else "; create missing JSON sidecars"
         if add_year_tag:
             text += "; include upload year"
         if add_copyright_tags:
@@ -88,8 +92,14 @@ def stage_command(
     add_year_tag=False,
     add_copyright_tags=False,
     overwrite_caption_files=False,
+    refiner_thinking=None,
+    refiner_json=None,
 ):
     command = [python, str(ROOT / "data" / stage.script)]
+    if stage.script == "generate_gemma_captions.py":
+        for flag, enabled in (("refiner-thinking", refiner_thinking), ("refiner-json", refiner_json)):
+            if enabled is not None:
+                command.append("--" + ("" if enabled else "no-") + flag)
     if stage.script == "fetch_danbooru_tags.py" and overwrite_danbooru_txt:
         command.append("--overwrite-existing-txt")
     if stage.script == "generate_gemma_captions.py" and overwrite_caption_cache:

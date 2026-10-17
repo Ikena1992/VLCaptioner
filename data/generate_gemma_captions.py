@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from runtime_config import pipeline_images
+from runtime_config import load_bool, pipeline_images
 from image_failures import is_skipped, skip_image
 
 import argparse
@@ -18,7 +18,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from ollama_client import OllamaClient
+from ollama_client import OllamaClient, OllamaUnavailableError
 from cache_seed import ensure_runtime_cache
 from parquet_captions import load_parquet_captions
 from runtime_config import load_positive_int, load_setting
@@ -44,6 +44,19 @@ class CaptionReviewError(RuntimeError):
         self.text = text
 
 
+class LazyModelClient:
+    """Check or pull an explicit model only when inference is actually needed."""
+    def __init__(self, client):
+        self.client = client
+        self.ready_models = set()
+
+    def chat(self, model, *args, **kwargs):
+        if model not in self.ready_models:
+            self.client.ensure_model(model, tqdm.write)
+            self.ready_models.add(model)
+        return self.client.chat(model, *args, **kwargs)
+
+
 def validate_caption(text, kind, payload=None):
     normalized = normalize_caption_output(text)
     issues = caption_text_issues(normalized, f".{kind}")
@@ -57,7 +70,7 @@ def validate_caption(text, kind, payload=None):
 
 
 def send_caption_to_review(image_path, error):
-    extensions = {".txt", ".short", ".long", ".tag", ".combined", ".csv", ".toriiOutput"}
+    extensions = {".txt", ".short", ".long", ".tag", ".combined", ".csv", ".toriiOutput", ".json"}
     sources = [image_path] + [image_path.with_suffix(ext) for ext in extensions
                               if image_path.with_suffix(ext).is_file()]
     finalizer.publish_files(sources, {
@@ -95,6 +108,10 @@ def initialize_cache(cache_path=CAPTION_CACHE):
             "image_hash TEXT NOT NULL, caption_kind TEXT NOT NULL, model TEXT NOT NULL, "
             "prompt TEXT NOT NULL, caption TEXT NOT NULL)"
         )
+        database.execute(
+            "CREATE INDEX IF NOT EXISTS captions_by_image "
+            "ON captions(image_hash, caption_kind, model)"
+        )
         database.commit()
     finally:
         database.close()
@@ -108,33 +125,97 @@ def file_hash(image_path):
     return digest.hexdigest()
 
 
-def caption_cache_key(image_path, caption_kind, model, prompt):
+def caption_reference(text, artist_names=()):
+    """Remove sidecar attribution without normalizing literal scene writing."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    return strip_artist_prefix(text, artist_names)
+
+
+def canonical_cache_prompt(prompt):
+    """Ignore presentation differences without dropping scene data or rules."""
+    prompt = prompt.replace("\r\n", "\n").replace("\r", "\n")
+    # Removing a standalone Torii thinking heading used to leave extra blank
+    # lines after this report heading. No literal scene text is changed here.
+    prompt = re.sub(r"(<torii_report>\n# Structured analysis[ \t]*\n)(?:[ \t]*\n)+",
+                    r"\1\n", prompt)
+    prompt = re.sub(r"(\n\n# Long caption to summarize\n<long_caption>\n)(.*?)"
+                    r"(\n</long_caption>\nSummarize this caption using the short-caption task "
+                    r"and source priorities above\.)(?=\nRefiner thinking mode: enabled\.\Z|\Z)",
+                    lambda match: match[1] + caption_reference(match[2]) + match[3],
+                    prompt, flags=re.DOTALL)
+    prompt = re.sub(
+        r"(\nOriginal caption reference:\n)(.*?)(\nRefiner thinking mode: (?:True|False))\Z",
+        lambda match: match[1] + caption_reference(match[2]) + match[3],
+        prompt, flags=re.DOTALL,
+    )
+    return prompt
+
+
+def _cache_key(image_digest, caption_kind, model, prompt):
     digest = hashlib.sha256()
-    digest.update(bytes.fromhex(file_hash(image_path)))
+    digest.update(bytes.fromhex(image_digest))
     digest.update(f"\0{caption_kind}\0{model}\0{prompt}".encode("utf-8"))
     return digest.hexdigest()
 
 
+def caption_cache_key(image_path, caption_kind, model, prompt):
+    return _cache_key(file_hash(image_path), caption_kind, model,
+                      canonical_cache_prompt(prompt))
+
+
 def get_cached_caption(image_path, caption_kind, model, prompt, cache_path=CAPTION_CACHE):
+    image_digest = file_hash(image_path)
+    canonical = canonical_cache_prompt(prompt)
     database = sqlite3.connect(cache_path)
     try:
-        row = database.execute(
-            "SELECT caption FROM captions WHERE cache_key = ?",
-            (caption_cache_key(image_path, caption_kind, model, prompt),),
-        ).fetchone()
+        row = None
+        keys = [_cache_key(image_digest, caption_kind, model, canonical)]
+        if canonical != prompt:
+            keys.append(_cache_key(image_digest, caption_kind, model, prompt))
+        for key in keys:
+            # Check stored inputs as well as the hash: previous normalizers
+            # could collapse meaningful spacing or line breaks in references.
+            candidate = database.execute(
+                "SELECT image_hash, caption_kind, model, prompt, caption "
+                "FROM captions WHERE cache_key = ?", (key,),
+            ).fetchone()
+            if (candidate is not None and candidate[:3] == (image_digest, caption_kind, model)
+                    and isinstance(candidate[3], str) and isinstance(candidate[4], str)
+                    and canonical_cache_prompt(candidate[3]) == canonical):
+                row = (candidate[4],)
+                break
+        if row is None:
+            candidates = database.execute(
+                "SELECT prompt, caption FROM captions "
+                "WHERE image_hash = ? AND caption_kind = ? AND model = ? ORDER BY rowid DESC",
+                (image_digest, caption_kind, model),
+            )
+            for cached_prompt, caption in candidates:
+                if (isinstance(cached_prompt, str) and isinstance(caption, str)
+                        and canonical_cache_prompt(cached_prompt) == canonical):
+                    row = (caption,)
+                    break
     finally:
         database.close()
     return row[0] if row else None
 
 
 def save_cached_caption(image_path, caption_kind, model, prompt, caption, cache_path=CAPTION_CACHE):
-    caption = validate_caption(caption, caption_kind)
+    if caption_kind == "json":
+        from PIL import Image, ImageOps
+        from refiner_json import validate_json
+        with Image.open(image_path) as image:
+            width, height = ImageOps.exif_transpose(image).size
+        caption = validate_json(caption, width, height)
+    else:
+        caption = validate_caption(caption, caption_kind)
     image_digest = file_hash(image_path)
     database = sqlite3.connect(cache_path)
     try:
         database.execute(
             "INSERT OR REPLACE INTO captions(cache_key, image_hash, caption_kind, model, prompt, caption) VALUES (?, ?, ?, ?, ?, ?)",
-            (caption_cache_key(image_path, caption_kind, model, prompt), image_digest, caption_kind, model, prompt, caption),
+            (_cache_key(image_digest, caption_kind, model, canonical_cache_prompt(prompt)),
+             image_digest, caption_kind, model, prompt, caption),
         )
         database.commit()
     finally:
@@ -181,14 +262,35 @@ def add_artist_prefix(caption, artist_names):
     if not formatted_artists:
         return caption
 
-    caption = re.sub(
-        r"^(?:\s*Drawn\s+by\s+[^.\r\n]+\.\s*)+",
-        "",
-        caption,
-        flags=re.IGNORECASE,
-    )
+    caption = strip_artist_prefix(caption, artist_names)
     prefix = f"Drawn by {', '.join(formatted_artists)}. "
     return prefix + caption
+
+
+def strip_artist_prefix(caption, artist_names=()):
+    # Recognize known CSV credits first, including dots followed by spaces in
+    # artist names. Legacy credits without @ require a metadata match so scene
+    # prose such as "Drawn by two horses, a carriage ..." stays intact.
+    names = [name.strip().lstrip("@") for name in artist_names if name.strip()]
+    credits = names + [", ".join(names)] if names else []
+    credits += ["@" + name for name in names]
+    if names:
+        credits.append(", ".join("@" + name for name in names))
+    credits.sort(key=len, reverse=True)
+    while True:
+        match = None
+        for credit in credits:
+            match = re.match(r"\s*Drawn\s+by\s+" + re.escape(credit) + r"\.(?:\s+|$)",
+                             caption, flags=re.IGNORECASE)
+            if match:
+                break
+        if match is None:
+            match = re.match(r"\s*Drawn\s+by\s+([^\r\n]*?)\.(?:\s+|$)",
+                             caption, flags=re.IGNORECASE)
+            if not match or not all(name.strip().startswith("@") and len(name.strip()) > 1
+                                    for name in match[1].split(",")):
+                return caption
+        caption = caption[match.end():]
 
 
 def write_result(image_path, short_text, long_text, artist_names=None, preserve_existing_long=False):
@@ -205,7 +307,7 @@ def write_result(image_path, short_text, long_text, artist_names=None, preserve_
         image_path.with_suffix(".long").write_text(long_text + "\n", encoding="utf-8")
 
 
-def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=False, overwrite_caption_files=False, prepare_tags=None):
+def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=False, overwrite_caption_files=False, prepare_tags=None, create_json=False):
     explanations = prompt_builder.load_character_explanations(prompt_builder.CHARACTER_DB)
     fallback = prompt_builder.load_wiki_explanations(prompt_builder.WIKI_CACHE_DB)
     prompts = {}
@@ -244,11 +346,16 @@ def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=Fa
             if prepare_tags is not None:
                 prepare_tags(image)
             built = prompt_builder.build_gemma_prompts(image, explanations, fallback, torii_output)
-            if built:
+            needs_json = create_json and (overwrite_caption_cache or not image.with_suffix(".json").exists())
+            if complete and needs_json and not built:
+                prompts[image] = {}
+                complete = False
+            elif built:
                 if uses_parquet:
                     parquet_cache_prompts[image] = built["long"]
-                if not complete:
+                if not complete or needs_json:
                     prompts[image] = built
+                    complete = False
             elif not complete:
                 skipped["no_prompt"].append(image.name)
             if complete:
@@ -289,6 +396,88 @@ def cache_parquet_long_captions(
     return cached
 
 
+def refiner_request(client, model, prompt, image_path, options, thinking=False,
+                    response_format=None):
+    """Give reasoning a second budget when it consumes the first generation."""
+    kwargs = {"think": thinking}
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+    text, payload = client.chat(model, prompt, image_path, options, **kwargs)
+    if thinking and (payload.get("done_reason") == "length" or not text.strip()):
+        tqdm.write(f"Retrying {image_path.name}: thinking returned no final answer or exhausted the token budget")
+        text, payload = client.chat(model, prompt, image_path,
+                                   {**options, "num_predict": options["num_predict"] * 2},
+                                   **kwargs)
+    return text, payload
+
+
+def generate_json_sidecar(client, image_path, model, thinking=False,
+                          overwrite_caption_cache=False,
+                          context_size=DEFAULT_CAPTION_CONTEXT_SIZE,
+                          cache_path=CAPTION_CACHE):
+    from refiner_json import PROMPT, validate_json, compile_layout, write_sidecar
+    destination = image_path.with_suffix(".json")
+    if destination.exists() and not overwrite_caption_cache:
+        return
+    # Reject edits/replacements during inference rather than associating a
+    # previous preview's coordinates with a new image or cache identity.
+    def image_identity():
+        stat = image_path.stat()
+        return stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino
+
+    identity = image_identity()
+
+    def ensure_same_image():
+        if image_identity() != identity:
+            raise ValueError("Image changed during layout generation; retry the image")
+
+    from PIL import Image, ImageOps
+    with Image.open(image_path) as image:
+        width, height = ImageOps.exif_transpose(image).size
+    reference_path = image_path.with_suffix(".long")
+    reference = (caption_reference(reference_path.read_text(encoding="utf-8-sig"), load_artist_names(image_path))
+                 if reference_path.exists() else "")
+    with OllamaClient.inference_image(image_path) as preview:
+        preview_size = preview.size
+    pw, ph = preview_size
+    prompt = PROMPT.replace('"width":800,"height":400', f'"width":{pw},"height":{ph}')
+    prompt = prompt.replace('"bbox":[0,0,100,100]', f'"bbox":[0,0,{pw},{ph}]')
+    prompt += f"\nInference preview canvas: width={pw}, height={ph} pixels.\n"
+    prompt += "Coordinate recipe: preview-to-original-v2-exact-edges. Return all boxes in preview pixels.\n"
+    prompt += "Original caption reference:\n" + reference
+    prompt += f"\nRefiner thinking mode: {thinking}"
+    ensure_same_image()
+    cached = None if overwrite_caption_cache else get_cached_caption(image_path, "json", model, prompt, cache_path)
+    text = None
+    if cached:
+        try:
+            text = validate_json(cached, width, height)
+            tqdm.write(f"Cache hit: {destination.name}")
+        except (ValueError, TypeError):
+            tqdm.write(f"Ignoring invalid cached JSON for {image_path.name}")
+    if text is None:
+        tqdm.write(f"Cache {'bypass' if overwrite_caption_cache else 'miss'}: {destination.name}; generating")
+        request_prompt = prompt
+        for attempt in range(2):
+            raw, payload = refiner_request(client, model, request_prompt, image_path,
+                {"temperature": 0.0, "num_predict": 16384 if thinking else 8192, "num_ctx": context_size},
+                thinking=thinking, response_format="json")
+            ensure_same_image()
+            try:
+                if payload.get("done_reason") == "length":
+                    raise ValueError("Truncated refiner JSON")
+                text = compile_layout(raw, width, height, preview_size=preview_size)
+                break
+            except (ValueError, TypeError) as error:
+                if attempt:
+                    raise
+                request_prompt = prompt + f"\nPrevious output was invalid: {error}. Return a complete corrected JSON object."
+        ensure_same_image()
+        save_cached_caption(image_path, "json", model, prompt, text, cache_path)
+    ensure_same_image()
+    write_sidecar(destination, text, overwrite=overwrite_caption_cache)
+
+
 def generate_caption(
     client,
     image_path,
@@ -299,42 +488,73 @@ def generate_caption(
     overwrite_caption_cache=False,
     cache_path=CAPTION_CACHE,
     context_size=DEFAULT_CAPTION_CONTEXT_SIZE,
+    thinking=False,
 ):
     prompt = prompts[image_path][kind]
     if kind == "short" and long_caption:
         prompt += (
             "\n\n# Long caption to summarize\n<long_caption>\n"
-            f"{normalize_caption_output(long_caption)}\n</long_caption>\n"
+            f"{caption_reference(long_caption, load_artist_names(image_path))}\n</long_caption>\n"
             "Summarize this caption using the short-caption task and source "
             "priorities above."
         )
+    if thinking:
+        prompt += "\nRefiner thinking mode: enabled."
     cached = None
     if not overwrite_caption_cache:
         cached = get_cached_caption(image_path, kind, model, prompt, cache_path)
     if cached:
         try:
-            return validate_caption(cached, kind)
+            text = validate_caption(cached, kind)
+            tqdm.write(f"Cache hit: {image_path.with_suffix('.' + kind).name}")
+            return text
         except CaptionReviewError:
             tqdm.write(f"Ignoring invalid cached {kind} caption for {image_path.name}")
+    tqdm.write(f"Cache {'bypass' if overwrite_caption_cache else 'miss'}: {image_path.with_suffix('.' + kind).name}; generating")
     options = {
         "temperature": 0.0,
-        "num_predict": CAPTION_MAX_NEW_TOKENS[kind],
+        "num_predict": CAPTION_MAX_NEW_TOKENS[kind] + (8192 if thinking else 0),
         "num_ctx": context_size,
         "repeat_last_n": 256,
-        "repeat_penalty": 1.15,
+        # Penalizing normal repeated prose words can force Qwen into endless
+        # synonym chains. Keep this neutral and validate actual repetition.
+        "repeat_penalty": 1.0,
         "stop": ["END_CAPTION"],
     }
-    try:
-        text, payload = client.chat(model, prompt, image_path, options)
-    except RuntimeError as error:
-        if not is_token_repeat_error(error):
-            raise
-        tqdm.write(f"Retrying {image_path.name} ({kind}): token repeat limit reached")
-        # Change greedy decoding so the retry can escape the same repetition loop.
-        text, payload = client.chat(model, prompt, image_path, {
-            **options, "temperature": 0.3, "repeat_penalty": 1.2,
-        })
-    text = validate_caption(text, kind, payload)
+    if thinking:
+        # A model can mention END_CAPTION while reasoning. Server stop tokens
+        # apply to reasoning too, so normalize the final marker locally instead.
+        options.pop("stop", None)
+    request_prompt = prompt
+    for attempt in range(2):
+        # A fresh sample can escape a degenerate greedy response. Neutralize
+        # repetition penalties on recovery: forced word avoidance can turn this
+        # model's prose into endless synonym chains. Share one retry budget
+        # with server repetition errors.
+        request_options = options if not attempt else {
+            **options, "temperature": 0.7, "repeat_penalty": 1.0,
+        }
+        try:
+            text, payload = refiner_request(client, model, request_prompt, image_path,
+                                           request_options, thinking=thinking)
+            text = validate_caption(text, kind, payload)
+            break
+        except CaptionReviewError as error:
+            if attempt:
+                raise
+            tqdm.write(f"Retrying {image_path.name} ({kind}): {error}")
+            request_prompt = prompt + (
+                f"\n\nPrevious response was rejected: {error}. "
+                "Write a fresh, complete caption from the supplied sources. "
+                "Use finite sentences describing supported scene details. "
+                "Do not continue the previous response or pad with word chains, "
+                "repetition, commentary, or reasoning. Follow the requested "
+                "caption length and finish with END_CAPTION."
+            )
+        except RuntimeError as error:
+            if attempt or not is_token_repeat_error(error):
+                raise
+            tqdm.write(f"Retrying {image_path.name} ({kind}): token repeat limit reached")
     save_cached_caption(image_path, kind, model, prompt, text, cache_path)
     return text
 
@@ -348,7 +568,17 @@ def process_image(
     overwrite_caption_cache=False,
     context_size=DEFAULT_CAPTION_CONTEXT_SIZE,
     overwrite_caption_files=False,
+    thinking=False,
+    create_json=False,
+    cache_path=CAPTION_CACHE,
 ):
+    if not overwrite_caption_files and all(
+        image_path.with_suffix(ext).exists() and image_path.with_suffix(ext).read_text(encoding="utf-8-sig").strip()
+        for ext in (".short", ".long")
+    ):
+        if create_json:
+            generate_json_sidecar(client, image_path, model, thinking, overwrite_caption_cache, context_size, cache_path)
+        return
     long_path = image_path.with_suffix(".long")
     long_text = (
         long_path.read_text(encoding="utf-8-sig").strip()
@@ -366,6 +596,8 @@ def process_image(
             prompts,
             overwrite_caption_cache=overwrite_caption_cache,
             context_size=context_size,
+            thinking=thinking,
+            cache_path=cache_path,
         )
     long_text = validate_caption(long_text, "long")
     if not reuse_existing_long and not overwrite_caption_files:
@@ -379,11 +611,15 @@ def process_image(
         long_text,
         overwrite_caption_cache=overwrite_caption_cache,
         context_size=context_size,
+        thinking=thinking,
+        cache_path=cache_path,
     )
     write_result(
         image_path, short_text, long_text, load_artist_names(image_path),
         preserve_existing_long=reuse_existing_long,
     )
+    if create_json:
+        generate_json_sidecar(client, image_path, model, thinking, overwrite_caption_cache, context_size, cache_path)
 
 
 def build_image_finalizer(add_year_tag=False, add_copyright_tags=False):
@@ -438,7 +674,7 @@ def main(argv=None):
     parser.add_argument(
         "--overwrite-caption-cache",
         action="store_true",
-        help="Bypass saved caption cache entries when generating; existing files are controlled separately.",
+        help="Bypass long, short and JSON caches; regenerate existing JSON when --refiner-json is enabled. Existing long/short files are controlled separately.",
     )
     parser.add_argument(
         "--overwrite-caption-files",
@@ -447,7 +683,11 @@ def main(argv=None):
     )
     parser.add_argument("--add-year-tag", action="store_true", help="Add post upload year to .tag files.")
     parser.add_argument("--add-copyright-tags", action="store_true", help="Add copyright/series tags to .tag files.")
+    parser.add_argument("--refiner-thinking", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--refiner-json", action=argparse.BooleanOptionalAction, default=None)
     args = parser.parse_args(argv)
+    thinking = args.refiner_thinking if args.refiner_thinking is not None else load_bool("REFINER_THINKING")[0]
+    create_json = args.refiner_json if args.refiner_json is not None else load_bool("REFINER_JSON")[0]
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
         sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
@@ -473,7 +713,7 @@ def main(argv=None):
     parquet = load_parquet_captions(SCRIPT_DIR / "parquet", local_stems)
     prompts, skipped, parquet_cache_prompts = discover_images(
         load_prompt_builder(), parquet, args.overwrite_caption_cache,
-        args.overwrite_caption_files, prepare_tags=finish_image.prepare_tags,
+        args.overwrite_caption_files, prepare_tags=finish_image.prepare_tags, create_json=create_json,
     )
     cached_parquet = cache_parquet_long_captions(
         parquet,
@@ -506,7 +746,7 @@ def main(argv=None):
     failed_repeat = 0
     reviewed = 0
     if prompts and configured_model.lower() != "auto":
-        client.ensure_model(model, tqdm.write)
+        client = LazyModelClient(client)
     refinement_started = time.monotonic()
     print(f"Refining captions for {len(prompts):,} image(s)...", flush=True)
     for index, image_path in enumerate(prompts, start=1):
@@ -520,8 +760,13 @@ def main(argv=None):
                 args.overwrite_caption_cache,
                 context_size,
                 args.overwrite_caption_files,
+                thinking=thinking, create_json=create_json,
             )
             finish_image(image_path)
+        except OllamaUnavailableError:
+            # A missing server/model is shared by the remaining batch. Stop
+            # promptly rather than repeating a failed model check per image.
+            raise
         except CaptionReviewError as error:
             try:
                 send_caption_to_review(image_path, error)

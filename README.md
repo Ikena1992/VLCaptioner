@@ -8,576 +8,284 @@ Finished images and text files are saved in `done/`.
 Ollama can run locally or on another computer on your network. Optional
 AnimeTimm/WD14 tagging runs on the computer running VLCaptioner.
 
-For a first run: [install the project](#setup), [copy and edit the
-configuration](#configuration), then [start the GUI](#captioning-images).
-Use the [image downloader](#image-downloader) or put one image and a matching
-tag file in `images/`. Check the resulting files
-in `done/` before processing a larger dataset.
+- **Caption datasets:** generate short captions, detailed captions, and cleaned tags.
+- **Collect and organize:** download from Danbooru or Gelbooru, inspect dataset tags,
+  and copy or move matching images with their companion files.
+- **Review results:** keep completed sets in `done/` and flagged sets in
+  `captionReview/`; optionally generate layout JSON sidecars.
 
-![VLCaptioner captioning GUI and copy/move images window](docs/images/gui-overview.png)
+[Quick start](#quick-start) Ã‚Â· [Workflow](#workflow) Ã‚Â· [Options](#options) Ã‚Â·
+[Outputs](#output-files) Ã‚Â· [Tools](#tools) Ã‚Â· [Help](#troubleshooting)
 
-The captioning GUI (left) and the copy/move tool with tag filters (right).
+<p>
+  <a href="docs/images/caption-options.jpg"><img src="docs/images/caption-options.jpg" width="320" alt="Current VLCaptioner caption options, including refiner thinking, layout JSON, and caption cache controls"></a>
+  <a href="docs/images/tag-options.jpg"><img src="docs/images/tag-options.jpg" width="320" alt="Current VLCaptioner tag options, including missing tags, booru tag replacement, upload year, and series tags"></a>
+  <br>
+  <sub>Caption and tag options in the current interface. Click either screenshot to view full-size.</sub>
+</p>
 
-## Setup
+## Quick start
 
-You need Python 3, Git, a Danbooru account and API key, and an
-[Ollama](https://ollama.com/download) server with enough memory and disk space
-for your chosen vision models. An NVIDIA GPU is strongly recommended.
-Both installers install CUDA-enabled PyTorch locally, even if Ollama runs on
-another computer. A local NVIDIA GPU speeds up AnimeTimm tagging. The tagger
-can also run on CPU. The Ollama host must have enough memory for both selected
-vision models and the configured context size.
+You need **Python 3**, **Git**, a **Danbooru account and API key**, and an
+**Ollama server** with enough memory for the selected vision models. An NVIDIA
+GPU is recommended. Ollama can run locally or on another computer; the optional
+AnimeTimm/WD14 tagger runs on the VLCaptioner computer and also supports CPU.
+Both installers install CUDA-enabled PyTorch locally.
 
-If an image has no `.txt` tags after the Danbooru lookup, the pipeline runs
-AnimeTimm/WD14 locally, using cached files or downloading its Hugging Face model.
-If AnimeTimm access is denied, it downloads and uses SmilingWolf EVA02 Large v3.
-
-Run the commands below from the VLCaptioner folder unless stated otherwise.
-
-### Download
-
-Install Git, then clone the project:
+### 1. Install
 
 ```console
 git clone https://github.com/Ikena1992/VLCaptioner.git
 cd VLCaptioner
 ```
 
-The repository includes small optional tag and explanation cache seeds. On first
-use, VLCaptioner copies them to writable local caches. Later cache updates
-stay outside Git. Python dependencies, downloaded models, and image datasets
-require additional disk space.
-
-### Windows
-
-Install Python with **Add Python to PATH** enabled and current NVIDIA drivers
-if using an NVIDIA GPU. Run the installer:
+On **Windows**, install Python with **Add Python to PATH** enabled, then run:
 
 ```powershell
 .\install.bat
+Copy-Item config.example.txt config.txt
 ```
 
-The installer creates `data/env` and installs the Python dependencies.
-
-### Linux
-
-Install Python, its virtual-environment support, and Tk. On Debian or Ubuntu:
+On **Debian or Ubuntu**:
 
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-venv python3-tk git
 bash scripts/4_install.sh
+cp config.example.txt config.txt
 ```
 
-The installer creates `data/env` and may request administrator access to
-install GUI support.
+Both installers create the Python environment in `data/env`.
 
-### Ollama
+### 2. Configure Ollama and API access
 
-Install and start Ollama on the computer that will run the vision models.
-For a local server, the default address is `http://localhost:11434`.
+Start Ollama on the computer that will run the vision models. Edit `config.txt`
+and replace the Danbooru placeholders with your credentials. Keep this file private.
+For a remote server, change `OLLAMA_URL` to its private network address.
 
-The default models are:
+| Setting | Default / value to supply |
+| --- | --- |
+| `OLLAMA_URL` | `http://localhost:11434` |
+| `TORII_OLLAMA_MODEL` | `hf.co/DraconicDragon/ToriiGate-0.5-GGUF:Q4_K_M` |
+| `OLLAMA_MODEL` | `orcarouter/Qwen3.8-27B-Uncensored:q4_K_M` |
+| `DANBOORU_LOGIN` | Your Danbooru login |
+| `DANBOORU_API_KEY` | Your Danbooru API key |
 
-- Torii analysis: `hf.co/DraconicDragon/ToriiGate-0.5-GGUF:Q4_K_M`
-- Caption refinement: `orcarouter/Qwen3.8-27B-Uncensored:q4_K_M`
+VLCaptioner asks Ollama to download missing models when captioning starts.
+The first run can take longer; model downloads and inference happen on the Ollama
+host. Both models must accept images and fit its available memory.
 
-VLCaptioner automatically checks whether the configured models are installed
-and asks Ollama to pull any missing models. Manual model downloads are
-optional. Download progress
-appears in the pipeline log, and the first run can take longer while models
-download. With a remote server, the downloads and model storage stay on that
-server.
+See [setup and configuration](docs/setup.md) for remote-server setup, optional
+Gelbooru credentials, manual model downloads, and AnimeTimm access.
 
-To download the models before starting a batch, run these commands on the
-Ollama host:
+### 3. Caption a small batch
 
-```console
-ollama pull hf.co/DraconicDragon/ToriiGate-0.5-GGUF:Q4_K_M
-ollama pull orcarouter/Qwen3.8-27B-Uncensored:q4_K_M
-```
+Launch the GUI from the project folder:
 
-The refinement model is configurable in `config.txt`. It must accept images
-and fit within the Ollama host's available memory.
+| Windows | Linux |
+| --- | --- |
+| `.\GUI.cmd` | `bash GUI.sh` |
 
-### Optional AnimeTimm access
+1. Review **1. Check setup** for API and Ollama readiness.
+2. Use **2. Download images (optional)** Ã¢â€ â€™ **Open image downloader**, or add
+   images directly to `images/`. Subfolders are not processed by the captioner.
+3. For a simple first test, add `sample.webp` and a matching `sample.txt`
+   containing tags such as `1girl, blue_hair, outdoors`.
+4. Click **Check again**, review **Options** and **Tag options**, then select
+   **Start captioning**.
+5. Inspect `done/` and `captionReview/` before starting a larger batch.
 
-To enable local tagging, accept the access terms on the
-[AnimeTimm model page](https://huggingface.co/animetimm/convnextv2_huge.dbv4-full),
-then log in using the installed environment.
+**Use copies of your originals.** Conversion replaces non-WebP inputs with WebP;
+finalization moves processed sets out of `images/`. Non-WebP images are resized
+to fit within 3000 Ãƒâ€” 3000 pixels and transparency is flattened onto white.
+Existing WebP files are left unchanged by conversion. Supported inputs:
+`.jpg`, `.jpeg`, `.png`, `.bmp`, `.tiff`, `.gif`, `.webp`; animations are not preserved.
+Use unique base filenames to avoid image and companion-file conflicts.
 
-Windows:
+## Updating
 
-```powershell
-.\data\env\Scripts\hf.exe auth login
-```
+Close VLCaptioner and run `update.cmd` on Windows. It updates the current branch
+from its configured upstream using a fast-forward pull. Local tracked changes,
+a detached checkout, or diverged history stop the update with an explanation.
+The updater does not reset or stash your work. Ignored configuration, datasets,
+and caches stay local. If dependencies changed, rerun `install.bat`.
 
-Linux:
+For unattended use, run `update.cmd --no-pause`; success returns exit code `0`
+and failures return `1`.
 
-```bash
-data/env/bin/hf auth login
-```
-
-Follow the login prompts. Images still without text tag files after the
-Danbooru step are tagged by AnimeTimm, regardless of the GUI checkbox. In the
-GUI, enable **Add missing tags to existing tag files** to also
-append missing high-confidence WD14 tags to existing text files.
-
-## Configuration
-
-Copy `config.example.txt` to `config.txt`, then edit it. On Windows PowerShell,
-run `Copy-Item config.example.txt config.txt`. On Linux, run
-`cp config.example.txt config.txt`. Replace the placeholder credentials and
-adjust the Ollama settings as needed:
+## Workflow
 
 ```text
-OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=orcarouter/Qwen3.8-27B-Uncensored:q4_K_M
-TORII_OLLAMA_MODEL=hf.co/DraconicDragon/ToriiGate-0.5-GGUF:Q4_K_M
-OLLAMA_TIMEOUT_SECONDS=300
-OLLAMA_CONTEXT_SIZE=65536
-
-DANBOORU_LOGIN=your-login
-DANBOORU_API_KEY=your-api-key
-DANBOORU_USER_AGENT=VLCaptioner/1.0 (your-login)
-
-# Optional Gelbooru fallback credentials
-GELBOORU_USER_ID=
-GELBOORU_API_KEY=
+images/ Ã¢â€ â€™ conversion Ã¢â€ â€™ source tags + metadata Ã¢â€ â€™ Torii analysis Ã¢â€ â€™ refinement
+                                                             Ã¢â€ â€œ
+                                                   caption quality check
+                                                   Ã¢â€ â„¢                  Ã¢â€ Ëœ
+                                                done/           captionReview/
 ```
 
-| Setting | Purpose |
-| --- | --- |
-| `OLLAMA_URL` | Address of the local or remote Ollama server. |
-| `OLLAMA_MODEL` | Image-capable model used to refine captions. |
-| `TORII_OLLAMA_MODEL` | ToriiGate model used for image analysis. |
-| `OLLAMA_TIMEOUT_SECONDS` | Maximum wait for an Ollama request, in seconds. |
-| `OLLAMA_CONTEXT_SIZE` | Refinement context window. Defaults to `65536`. High-resolution images may need more. |
-| `DANBOORU_LOGIN`, `DANBOORU_API_KEY` | Credentials used for Danbooru metadata requests. |
-| `DANBOORU_USER_AGENT` | Optional identifier for Danbooru requests. |
-| `GELBOORU_USER_ID`, `GELBOORU_API_KEY` | Optional credentials for Gelbooru fallback requests. Obtain both from your Gelbooru account options; API access may require them. |
+For MD5-named images, tag lookup checks Danbooru, then Gelbooru. Existing source
+tag files are kept unless replacement is enabled. Missing or blank tags are
+filled locally by AnimeTimm; if access is denied, SmilingWolf EVA02 Large v3 is
+used instead. The **Add missing tags** option controls additions to existing
+tag files; it does not disable tagging images that lack tags.
 
-Gelbooru is searched when Danbooru has no matching post. Leave the Gelbooru
-credentials blank for unauthenticated access, or fill in both when required.
-Tag categories are cached automatically in
-`data/caches/gelbooru_tag_categories.sqlite3`; no cache setting is needed.
+The **Steps** tab shows progress and the **Activity** log explains failures.
+Per-image failures leave the affected images for a later run while other images
+continue; setup or model failures can stop the run. **Stop** keeps completed work.
+Start again to retry remaining images using existing caches where possible.
 
-Keep `config.txt` private: it contains your API keys. VLCaptioner reads these
-settings from the file, not from environment variables.
+See the [captioning reference](docs/captioning.md) for metadata handling,
+quality checks, recovery, and regeneration details.
 
-### Ollama on another computer
+## Options
 
-Set `OLLAMA_URL` to the server's private address, for example
-`http://192.168.1.50:11434`. Model downloads and vision inference run on that
-server. VLCaptioner sends it the images and prompts.
+Options and theme choices are saved locally and restored on the next launch.
+The following switches default to off; thinking and JSON defaults can also be
+set in `config.txt` for the command line and first GUI launch.
 
-Configure Ollama to listen on the network. For a manually started server:
-
-Windows PowerShell:
-
-```powershell
-$env:OLLAMA_HOST = "0.0.0.0:11434"
-ollama serve
-```
-
-Linux:
-
-```bash
-OLLAMA_HOST=0.0.0.0:11434 ollama serve
-```
-
-Stop any existing Ollama instance before starting another. If Ollama runs as a
-service, set `OLLAMA_HOST` in its service environment and restart it.
-
-Allow TCP port `11434` through the server's private-network firewall.
-Keep access restricted to trusted computers. Do not expose the Ollama API
-directly to the internet.
-
-## Captioning images
-
-The conversion step saves images as
-WebP, resizes images to fit within 3000 × 3000 pixels, and flattens transparency
-onto white. JPEG inputs may use lossy WebP compression to reduce file size.
-Existing WebP files are left unchanged by this conversion step.
-Supported input extensions are `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tiff`, `.gif`,
-and `.webp`. Animated images are not preserved as animations.
-
-Work from copies if you need to retain the source files. Successful conversion
-replaces each non-WebP input in `images/` with a WebP file. Successful
-finalization removes the processed image and source `.txt` from `images/` after
-placing them in `done/`.
-
-The **Caption images** tab has three boxes, from top to bottom:
-**1. Check setup**, **2. Download images (optional)**, and **3. Add images**.
-
-1. Start the GUI with `.\GUI.cmd` on Windows or `bash GUI.sh` on Linux.
-2. Review **1. Check setup** for configuration, API access, and Ollama readiness.
-   Missing Ollama models are reported and downloaded when captioning starts.
-3. Use **2. Download images (optional)** to download originals and matching tags,
-   or **3. Add images** to open `images/` and add your own files. Place images
-   directly inside `images/`; the captioner does not process subfolders.
-   **Copy / move by tags** opens the existing image-transfer tool.
-4. For manually added images, add any existing tags as matching text files,
-   such as `sample.webp` and
-   `sample.txt`. A simple `sample.txt` might contain
-   `1girl, blue_hair, outdoors`. MD5-named images support automatic Danbooru
-   lookups. For a first run, provide a `.txt` file so you can test captioning
-   without relying on local AnimeTimm model access.
-5. Select **Check again** after adding or downloading images. Choose your settings
-   in the **Options** tab, then click **Start captioning**.
-6. Watch the current stage and open completed files or files needing review
-   from the GUI. The **Activity** log is always visible. Use **Light / dark** to switch themes.
-
-Rename images with the same base filename before starting. Conversion and
-tagging skip conflicting images to protect existing files.
-
-### Automatic Danbooru tags
-
-For images named after their original MD5 hash, such as
-`2e3eee4f9c2183d3c977144050ff74d8.webp`, the pipeline searches Danbooru and
-downloads the matching tags and metadata. Image conversion preserves the
-filename's hash, which is used for the Danbooru lookup.
-
-Existing `.txt` tag files are kept and their Danbooru lookup is skipped unless
-**Replace existing tags with fresh Danbooru or Gelbooru tags** is enabled. If an
-image has no matching Danbooru post or uses another filename, its tags can come
-from a matching `.txt` file or from the local tagger. Images still without a
-`.txt` file are tagged with AnimeTimm, or SmilingWolf if AnimeTimm access is denied.
-Blank or metadata-only `.txt` files also receive full tagging, preserving their
-metadata, even when adding high-confidence tags to existing files is disabled.
-
-This step fetches tags for images already in `images/`. It does not download
-image files.
-
-### GUI options
-
-| Option | On | Off (default) |
+| Tab | Option | When to enable it |
 | --- | --- | --- |
-| **Add missing tags to existing tag files** | Appends missing high-confidence tags. | Leaves existing tag files unchanged. Images without tags are tagged either way. |
-| **Replace existing tags with fresh Danbooru or Gelbooru tags** | Replaces matching source tags with tags from the first matching post. | Keeps existing tag files and skips their lookup. |
-| **Bypass refinement caption cache** | Generates fresh refinement output where needed. Torii reports and Parquet inputs are reused. | Reuses cached captions when available. Existing files are controlled by the option below. |
-| **Overwrite existing .long and .short files** | Replaces both caption files even when they already exist; cache use follows the setting above. | Keeps existing `.long` files and skips images that have both caption files. |
-| **Add upload year to .tag files** | Adds `year YYYY` when a post date is available. | Omits the year tag. |
-| **Include copyright and series tags in .tag files** | Includes them in `.tag` and `.combined`. | Omits them there; source TXT and CSV retain them. |
+| Options | **Enable refiner thinking** | Use reasoning with a compatible refiner; processing can take longer. |
+| Options | **Create .json files** | Generate MOSS layout prompts with item descriptions and bounding boxes. |
+| Options | **Bypass refinement caption cache** | Request fresh captions and, when JSON creation is enabled, regenerate JSON. |
+| Options | **Overwrite existing .long and .short files** | Replace caption files already present in the input set. |
+| Tag options | **Add missing tags to existing tag files** | Append missing high-confidence local tags. |
+| Tag options | **Replace existing tags with fresh Danbooru or Gelbooru tags** | Refresh source tags from the first matching post. |
+| Tag options | **Add upload year to .tag files** | Include `year YYYY` when an upload date is available. |
+| Tag options | **Include copyright and series tags in .tag files** | Retain these tags in `.tag` and `.combined`. |
 
-The pipeline converts images, fetches Danbooru tags, and runs local AnimeTimm
-tagging where needed. It looks up tag and character explanations and creates
-the CSV metadata needed for captioning. Eligible clean, single-character images also
-supply generated character references.
+To regenerate a completed image, copy it and its source `.txt` back to `images/`.
+Enable caption overwrite to replace existing captions, and cache bypass to request
+fresh model output. These controls are independent.
 
-Torii then produces visual analysis, which is normalized and passed to the
-refinement model. The final stage creates long and short captions and cleans the
-tags. Each asset set is checked before publication: passing sets go straight to
-`done/`, and flagged sets go straight to `captionReview/`. Existing caches are
-reused when available.
-
-The **Steps** tab shows how the selected options affect each step. During a
-run it reports Pending, Running, Done, Skipped, Failed, or Stopped. Work is
-checked immediately before each step, so tags fetched earlier in the run can
-make local tagging unnecessary. Steps after a failure are marked Not run.
-The metadata step creates a CSV from TXT tags only when no CSV exists.
-Existing CSVs are skipped, even if the TXT tags have changed. Post metadata
-is restored from the TXT metadata record when creating a new CSV. Unresolved
-tag categories skip the affected image for the current run so incomplete
-metadata can be fixed and retried. Per-image conversion, tagging, metadata,
-captioning, and finalization failures are logged; remaining images continue.
-Skipped images stay in `images/`, and a new run retries them. The GUI reports
-the skipped count on completion. Missing required models, invalid setup, or
-other run-wide failures still stop the pipeline.
-
-### Stopping and resuming
-
-Click **Stop** to interrupt a run. Completed assets remain in `done/`.
-Fix any reported issue and start the pipeline again to process remaining
-images in `images/`. Existing results and caches are reused where possible.
-
-To regenerate captions for a completed image, copy the image and its source
-`.txt` tags back into `images/`. Enable **Overwrite existing .long and .short
-files** to replace present caption files. Also enable **Bypass refinement caption
-cache** if you want fresh model output instead of a matching cached result.
-
-After an interrupted save, `.finalize-*` folders in `done/` hold the recovery
-information needed by the next run. Removing them prevents automatic recovery.
+For JSON coordinates, validation, thinking behavior, and visible-text handling,
+see [advanced captioning](docs/advanced.md). Use **Layout viewer** in the GUI or
+run `LayoutViewer.cmd` to inspect JSON boxes on their source image.
 
 ## Output files
 
-Each completed image has these companion files in `done/`:
+Completed sets go to `done/`; flagged sets and their companion files go to
+`captionReview/`. Generated captions and estimated layout boxes need review
+before use in training.
 
 | File | Contents |
 | --- | --- |
 | `NAME.webp` | Processed image. |
 | `NAME.short` | Compact natural-language caption. |
 | `NAME.long` | Detailed natural-language caption. |
-| `NAME.tag` | Cleaned and ordered Danbooru-style tags. |
-| `NAME.combined` | Tag caption followed by a dot and the short caption. |
-| `NAME.txt` | Comma-separated source tags, including fetched meta tags. |
+| `NAME.tag` | Cleaned and ordered tags. |
+| `NAME.combined` | Tags followed by a dot and the short caption. |
+| `NAME.txt` | Source tags, including fetched meta tags. |
+| `NAME.json` | Optional MOSS layout prompt, when JSON creation is enabled. |
 
-The `.tag` generator intentionally drops most booru meta tags. It includes
-only medium-related meta tags, such as `watercolor (medium)` and
-`traditional media`; resolution tags such as `highres` are not needed for
-training. The fetched meta tags remain available in the CSV until finalization.
-Fetched `.txt` files retain the complete meta list as plain tags. CSV files
-store post ID, source, score, rating, date, and tag categories from the booru
-response. If a CSV is missing, it can be rebuilt from the `.txt` tags, but
-post metadata absent from the text cannot be recovered without another lookup.
-
-Generated captions can contain errors and benefit from review before training.
-
-For example, an input pair `sample.webp` and `sample.txt` containing
-`1girl, blue_hair, outdoors` may produce files like these. The actual text
-depends on the image and models:
+For example, `sample.webp` and `sample.txt` might produce:
 
 ```text
-done/sample.short     A blue-haired character stands outdoors.
-done/sample.long      A character with blue hair stands in an outdoor scene...
-done/sample.tag       1girl, blue hair, outdoors
-done/sample.combined  1girl, blue hair, outdoors. A blue-haired character stands outdoors.
-done/sample.txt       1girl, blue_hair, outdoors
-done/sample.webp      The processed image
+sample.short     A blue-haired character stands outdoors.
+sample.tag       1girl, blue hair, outdoors
+sample.combined  1girl, blue hair, outdoors. A blue-haired character stands outdoors.
 ```
 
-### Caption quality review
+Captions depend on the image and selected models. The [output reference](docs/captioning.md#output-files)
+explains tag filtering, source metadata, and review criteria.
 
-During finalization, the GUI and command-line pipeline check caption sets before
-placing them in `done/`. Missing or empty `.short`/`.long` captions, leaked control text such
-as `END_CAPTION` or `<think>`, or more than 250 words between sentence breaks in a long caption
-trigger review. The image and its companion files are placed together in
-`captionReview/`. The pipeline log shows each flagged image and the reason.
-Suspicious but uncertain wording is not flagged.
-Run `python data/check_caption_quality.py --dry-run` to preview findings
-without moving files.
-
-## Optional tools
+## Tools
 
 ### Image downloader
 
-Download searches use a compact table suitable for thousands of rows. Select a
-row and edit its source, search tags, and post limit in the fields below the table.
-Changes are saved with the downloader settings. Use Ctrl or Shift to select
-multiple rows, then **Remove selected** (or Delete) to remove them.
+Open **Open image downloader** under **2. Download images (optional)**. Add a
+Danbooru or Gelbooru search, enter space-separated tags, set a **Post limit**,
+and click **Start downloads**. A post limit counts posts checked, so 100 posts
+can yield fewer than 100 downloads. Optional blacklist tags apply to all rows.
 
-Download and Copy / move are owned windows of the captioning GUI. Opening either
-tool again brings its existing window forward. Closing the captioning GUI stops
-active work and waits for its tool windows to close. Launching a tool directly
-also opens its owning captioning GUI.
-Copy / move waits until downloads and captioning finish. Manual captioning also
-waits for downloads to finish; automatic batch captioning can run alongside them.
+Enable **Caption automatically** to process downloads in batches (default: 50)
+while downloading continues. Manage batches in the captioner's **Queue** tab.
+**Pause queue** lets the active batch finish; **Stop** interrupts active captioning.
+Use **Retry selected** and **Resume queue** to continue failed or stopped batches.
 
-To download and caption simultaneously, keep the captioning GUI open and choose
-its caption options. In the downloader, enable **Caption automatically** and set
-**Images per batch** (default: 50). Completed downloads appear in the captioning
-GUI's **Queue** tab. Each batch runs through all steps while downloads continue.
-The final smaller batch is queued when downloads finish or stop.
+### Dataset manager
 
-Settings and detailed progress stay in the captioning GUI. Settings are captured
-when each batch starts and retained for retries. **Pause queue** lets the active
-batch finish; **Stop** stops the active captioning batch. Use **Retry selected**
-and **Resume queue** for stopped or failed batches. Cancelling a waiting batch returns its images and companion files to `images/`,
-then removes its folder and queue record. Completed batches are also cleaned up. Queued requests survive closing the GUIs; interrupted active
-batches appear as stopped when the captioning GUI reopens.
-If the downloader exits unexpectedly, its completed images are recovered as a
-stopped batch in Queue. Select that batch and retry it; partial downloads are
-excluded. Queued captioning waits until the captioning setup check succeeds.
+Select **Open dataset manager**, choose folders, and click **Scan selected**.
+Filter tag counts by category or dataset, preview matching images, and export
+statistics as CSV. Scanning does not modify dataset files.
 
-Start the captioning GUI with `GUI.cmd` on Windows or `bash GUI.sh` on Linux,
-then select **Open image downloader** in **2. Download images (optional)**.
-The downloader opens in a separate window with no viewer and does not require
-Ollama. No separate downloader launcher is needed. On Windows, `GUI.cmd`
-launches `data/GUI.pyw` using the installed Python environment.
+Use **Download moreÃ¢â‚¬Â¦** on selected tags to prepare searches. Set **Target in done**
+to fill a dataset toward a desired count; leave it blank for ordinary downloads.
 
-1. Add a row for each search and choose **Danbooru** or **Gelbooru**.
-2. Enter space-separated search tags, such as `blue_eyes long_hair`.
-3. Set a positive **Post limit**. This is the number of posts checked, including
-   blacklisted posts, images already in `images/` or `done/`, unavailable
-   originals, unsupported files, and failed downloads. A limit of 100 can
-   download fewer than 100 images.
-4. Optionally enter a **Tag blacklist**, such as `tall_image watermark comic`.
-   Use spaces, just like search tags. Keep underscores within tags:
-   `tall_image` matches that tag; `tall image` does not. Any matching blacklist
-   tag skips the image. Matching uses whole tags and ignores letter case and
-   extra spaces. The blacklist applies to every row; leave it blank to allow
-   all tags. Older saved comma-separated blacklists are converted on reopening.
-5. Select **Start downloads**. Rows run sequentially. **Stop** cancels the queue;
-   an active network request may need to return first. Closing the window
-   waits for cancellation and cleanup.
+### Copy, move, and export
 
-Original image files are saved in `images/` as `<md5>.<original extension>`.
-Each download also saves `<md5>.txt` and `<md5>.csv` using the captioner's
-existing tag writer: categorized tags, readable spaces instead of underscores,
-safety/quality tags, and CSV source metadata. Gelbooru categories use the shared
-tag cache and API. Existing nonempty TXT files are preserved; skipped images
-are not modified. CSV metadata is enriched using the same rules as the captioner,
-preserving existing nonempty fields.
+**Copy / move by tags** finds matching images and keeps companion files together.
+It searches `.txt` by default; use `.tag` or `.combined` to match generated text.
 
-The downloader remembers all rows and the blacklist when starting downloads
-or closing the window, and restores them on reopening. Settings are stored
-locally in `data/caches/downloader_settings.json`; reopening never starts
-downloads automatically.
+For a captions-only ZIP, run `scripts/2_createZipFile.bat` on Windows or
+`bash scripts/6_createZipFile.sh` on Linux. The resulting
+`naturalLanguage_files.zip` contains `.short`, `.long`, `.tag`, `.combined`, and
+`.txt` files from `done/`; images and layout JSON are not included.
 
-The log shows search pages, post IDs, original filenames, tag-file preparation,
-and reasons for skips (including the matching blacklist tags or existing MD5
-images). It also explains download failures and when the post limit is reached.
-Each row ends with downloaded, skipped, blacklisted, unavailable, and failed counts.
+See the [tools guide](docs/tools.md) for search rules, deduplication, queue
+recovery, gap filling, and saved settings.
 
-Matching MD5 image filenames anywhere in `images/` or `done/` (including subfolders
-and converted images with a different extension) are skipped. Downloaded files
-are verified against the site's MD5 before publication; partial files are removed.
-Tag files are prepared separately before publication, so cancellation during tag
-preparation does not leave TXT/CSV files without an image. Failed image publication
-rolls back changes to tag files. The completion status reports errors explicitly.
-Existing images are never overwritten. API credentials use the existing
-`DANBOORU_LOGIN` / `DANBOORU_API_KEY` and `GELBOORU_USER_ID` /
-`GELBOORU_API_KEY` settings in `config.txt`. Site search and account limits apply.
+## Command line
 
-### Copy or move images by tags
-
-The helper searches the selected file extension for tags (default `.txt`) and
-keeps matching images and sidecar files together. Enter another extension, such
-as `.tag` or `.combined`, to search those files instead.
-Click **Copy / move by tags** in the captioning GUI's **3. Add images** box.
-
-### Export captions as a ZIP
-
-Run `scripts/2_createZipFile.bat` on Windows or
-`bash scripts/6_createZipFile.sh` on Linux. This creates
-`naturalLanguage_files.zip` from the `.short`, `.long`, `.tag`, `.combined`,
-and `.txt` files in `done/`. Images are not included.
-
-### Run without the GUI
-
-Windows:
+Run the same pipeline without the GUI:
 
 ```powershell
+# Windows
 .\data\env\Scripts\python.exe data/pipeline_runner.py --skip-wd14
 ```
 
-Linux:
-
 ```bash
+# Linux
 data/env/bin/python data/pipeline_runner.py --skip-wd14
 ```
 
-`--skip-wd14` skips only the high-confidence missing-tag pass for images with
-existing text files. Images still without text files after Danbooru are tagged
-either way. Omit it to also update existing tag files. Use
-`--overwrite-danbooru-txt` to refresh
-source tags or `--overwrite-caption-cache` to bypass cached captions when
-generating. Use `--overwrite-caption-files` to replace existing
-`.long` and `.short` files.
+`--skip-wd14` keeps existing tag files unchanged by the high-confidence tagging
+pass. Images without tags still receive local tagging when needed.
 
-Tag lookup searches Danbooru first, then Gelbooru when no matching post is found.
-Both use the MD5 in the image filename. Gelbooru results retain tag categories,
-rating, score, post ID, and original source URL; the CSV `source` is `gelbooru`.
-The optional year tag uses the matched post's upload year and is omitted when
-the source has no usable date. The pipeline does not generate aesthetic score
-tags such as `score_1` through `score_9`; post scores only determine quality
-labels such as `good quality`.
+| Flag | Purpose |
+| --- | --- |
+| `--overwrite-danbooru-txt` | Refresh existing source tags. |
+| `--overwrite-caption-cache` | Bypass refinement caches. |
+| `--overwrite-caption-files` | Replace existing `.long` and `.short` captions. |
+| `--refiner-thinking` / `--no-refiner-thinking` | Override configured thinking mode. |
+| `--refiner-json` / `--no-refiner-json` | Override configured layout JSON generation. |
 
-Quality thresholds depend on the post rating. For general and sensitive posts,
-scores above 130 receive `masterpiece`; for questionable and explicit posts,
-scores above 230 receive it. The remaining quality ranges are scaled in the
-same proportion. `best quality` starts at 71 for general/sensitive posts and
-125 for questionable/explicit posts; `good quality` starts at 36 and 63,
-respectively. Unknown ratings use the questionable/explicit thresholds.
-Existing TXT files are still skipped unless `--overwrite-danbooru-txt` is used.
-The standalone refresh script also uses this fallback.
-If Gelbooru requires authentication, add `GELBOORU_USER_ID` and `GELBOORU_API_KEY`
-from your Gelbooru account options to `config.txt` (see `config.example.txt`).
-API failures are reported and do not write partial Gelbooru metadata.
-Gelbooru tag types persist between runs in
-`data/caches/gelbooru_tag_categories.sqlite3`, using the existing SQLite cache
-implementation. Only uncached types are requested; Danbooru's cache stays separate
-because the sites can classify the same tag differently.
-New installations copy the bundled `gelbooru_tag_categories.seed.sqlite3` into
-the writable cache on first use. Later tag-type updates stay local.
+Use `data/pipeline_runner.py --help` with the installed Python environment for
+all flags. [Cache and tag lookup details](docs/tools.md#run-without-the-gui)
+explain how cached results and source metadata are reused.
 
 ## Troubleshooting
 
-### Cannot connect to Ollama
+| Problem | First check |
+| --- | --- |
+| Cannot connect to Ollama | Confirm the server is running and `OLLAMA_URL` is correct; check network binding and firewall for a remote host. |
+| Model download fails | Try `ollama pull` on the Ollama host; check the model name, access, and free disk space. |
+| Requests time out | Increase `OLLAMA_TIMEOUT_SECONDS`. |
+| Out of memory | Reduce other GPU workloads or choose a smaller refinement model or quantization. |
+| Request exceeds context size | Increase `OLLAMA_CONTEXT_SIZE`, allowing room for the response; larger contexts need more memory. |
+| Local tagging fails | Check AnimeTimm access and the local Python/GPU installation; inspect the log for the selected tagger. |
+| Images remain without captions | Read **Activity** for missing tags, metadata, or unusable prompts, fix the cause, and rerun. |
 
-Check that Ollama is running and `OLLAMA_URL` points to the correct computer.
-Test the address from the VLCaptioner computer:
+GUI crash diagnostics stay local in `data/caches/crashes.log`.
+See the [troubleshooting guide](docs/troubleshooting.md) for commands and detailed fixes.
 
-```console
-curl http://localhost:11434/api/version
-```
+## Documentation
 
-For a remote server, replace `localhost` with its address and check its
-network binding and firewall rules.
+- [Setup and configuration](docs/setup.md): installation, models, remote Ollama, API access.
+- [Captioning reference](docs/captioning.md): conversion, tags, options, outputs, quality review.
+- [Tools guide](docs/tools.md): downloads, dataset statistics, queues, export, and caches.
+- [Advanced captioning](docs/advanced.md): thinking, layout JSON, coordinates, and viewer.
+- [Troubleshooting](docs/troubleshooting.md): connection, model, memory, tagging, and crash diagnostics.
 
-### Model download fails
+## Contributing
 
-Run `ollama pull` with the configured model name on the Ollama host. Check
-the name, network connection, available disk space, and any access requirements.
-Both caption models must support images.
-
-### Requests time out or run out of memory
-
-Increase `OLLAMA_TIMEOUT_SECONDS` for slow requests. For memory errors, reduce
-other GPU workloads or select a smaller refinement model or quantization.
-
-If the error says `exceeds the available context size`, increase
-`OLLAMA_CONTEXT_SIZE` above the reported token count, allowing room for the
-response. Larger contexts need more memory. Oversized requests are skipped
-while the rest of the queue continues. Retry the remaining images after
-adjusting the setting.
-
-### Local tagging fails
-
-Check Hugging Face access for AnimeTimm and the local PyTorch/GPU installation.
-AnimeTimm is preferred when its files are cached or accessible. If Hugging Face
-denies access, VLCaptioner automatically downloads and uses
-`SmilingWolf/wd-eva02-large-tagger-v3` instead. The log identifies the active
-model. The fallback uses ONNX Runtime with general/character thresholds of
-0.35/0.85; the existing-TXT pass uses 0.91 and ratings remain disabled.
-To enable AnimeTimm, accept/request access on its model page, then run
-`hf auth login` on the computer running VLCaptioner with a read token from
-the approved account, or set `HF_TOKEN`. The token must allow access to the
-gated model. Network failures are reported separately from access denials.
-The Ollama server's GPU does not run this tagger. If you already have suitable
-tags, leave **Add missing tags to existing tag files** off.
-
-### Images are skipped without captions
-
-Check the log for missing CSV metadata or unusable prompts. Make sure each
-image has source tags: use a matching `.txt` file, a successful Danbooru lookup,
-or enable AnimeTimm tagging. Run the full pipeline again so it can prepare the
-metadata before captioning.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, local validation,
+and pull request guidance. The [development guide](docs/development.md) maps the
+main modules. Use [GitHub issues](https://github.com/Ikena1992/VLCaptioner/issues)
+for bugs and feature requests, and follow the [security policy](SECURITY.md) for
+vulnerability reports.
 
 ## License
 
 VLCaptioner's software is licensed under [Apache 2.0](LICENSE). Third-party
 models and data retain their respective terms.
-
-### Dataset manager
-
-Click **Open dataset manager** in **2. Download images (optional)** to browse
-the tags in `done/`. Dataset 2 is empty by default and can be selected for
-comparison. Scanning starts only when you click
-**Scan / Refresh**, and **Cancel scan** stops it while keeping previous results.
-You can choose other folders, filter tags by
-category and image count, preview matching images and TXT files, and export
-the filtered statistics as CSV. Categories come from the local Danbooru and
-Gelbooru caches; missing classifications appear as Unknown. Scanning does not
-modify images, tag files, or caches. Reopening the manager focuses its existing
-window, and closing the captioner closes the manager too.
-
-Select one or more tags (Ctrl-click or Shift-click) and click **Download more…**
-to add a pair of downloader rows for each tag: a Danbooru row with `order:score`
-and a Gelbooru row with `sort:score`, with automatic captioning enabled.
-Both rows share gap progress, so the second source fills only the remaining gap.
-Set **Target in done** independently for each row to the desired total
-number of matching images in `done/`, then start downloads. Gap filling uses
-one positive tag per row and counts matching image/TXT pairs in `done/` and
-`done1/` when available. Copies sharing an MD5 filename count only once.
-It downloads the difference, ignoring the post limit; duplicates, blacklisted
-posts, and failed downloads do not consume the gap. It stops when enough new
-images have downloaded, search results run out, or you click Stop. Leave the
-target blank for ordinary downloads. Captioning must finish successfully to
-reach the target in `done/`; rerun gap filling after captioning if images failed
-or went to review. `done1/` also remains an optional duplicate-check folder.
-
-The combined dataset counts each image once, including when selected folders
-overlap. Each dataset column counts membership in its own folder. Caption
-variants such as `.long.txt` and `.short.txt`, comment lines, and VLTagger
-metadata are excluded from tag statistics.

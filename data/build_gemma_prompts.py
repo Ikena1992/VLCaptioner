@@ -28,13 +28,23 @@ def sanitize_torii_output(text: str) -> str:
     """Remove model-control/reasoning wrappers before embedding a Torii report."""
     text = html.unescape(text).replace("\\<", "<").replace("\\>", ">")
     text = text.replace("{", "").replace("}", "")
-    text = re.sub(
-        r"(?ims)^[ \t]*\\?#+[ \t]*<think>[ \t]*\r?\n.*?"
-        r"^[ \t]*(?:\\?#+[ \t]*)?</think>[ \t]*(?:\r?\n|\Z)",
-        "",
-        text,
-    )
-    text = re.sub(r"(?im)^[ \t]*(?:\\?#+[ \t]*)?</?think>[ \t]*$", "", text)
+    # Reports can contain plain, inline, nested, or unfinished reasoning blocks.
+    # Remove their contents as well as their markers; retain only report prose.
+    parts = []
+    depth = 0
+    previous = 0
+    for marker in re.finditer(r"</?think\s*>", text, flags=re.IGNORECASE):
+        if depth == 0:
+            parts.append(text[previous:marker.start()])
+        if marker.group().startswith("</"):
+            depth = max(0, depth - 1)
+        else:
+            depth += 1
+        previous = marker.end()
+    if depth == 0:
+        parts.append(text[previous:])
+    text = "".join(parts)
+    text = re.sub(r"(?m)^[ \t]*\\?#+[ \t]*\r?$", "", text)
     return text.strip()
 
 SIMPLE_BACKGROUND_TAGS = {
@@ -561,15 +571,16 @@ def build_caption_prompts(
             "describe their positions and interactions. "
         )
 
-    if has_text:
-        common_rules.append(
-            "For writing included in the caption, transcribe clearly legible "
-            "text exactly in double quotation marks and identify its location. "
-            "For visible but unreadable writing, "
-            "describe its placement and appearance without guessing the "
-            "wording. When writing is absent, omit the topic entirely. Follow "
-            "the writing coverage specified in the caption task below. "
-        )
+    common_rules.append(
+        "Check the image for writing even when no text tags are supplied. "
+        "Transcribe legible non-watermark text exactly, preserving its original "
+        "script, spelling, punctuation, and line breaks. Do not translate, "
+        "paraphrase, romanize, or normalize it. Describe ordering, relative "
+        "position, alignment, size hierarchy, font/style, color, spacing, and "
+        "arrangement of text blocks where visible. Do not guess unreadable "
+        "wording. Exclude watermarks from captions. When writing is absent, "
+        "omit the topic. Follow the writing coverage in the caption task. "
+    )
 
     if not character_names:
         if "furry" in raw_tags_set:

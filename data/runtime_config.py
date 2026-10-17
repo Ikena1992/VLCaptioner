@@ -44,3 +44,31 @@ def load_positive_int(setting_name, default=None):
     if result < 1:
         raise ValueError(f"{setting_name} must be at least 1")
     return result, config
+
+
+def load_bool(setting_name, default="false"):
+    value, config = load_setting(setting_name, default)
+    if value.lower() not in {"true", "false", "1", "0", "yes", "no"}:
+        raise ValueError(f"{setting_name} must be true or false")
+    return value.lower() in {"true", "1", "yes"}, config
+
+
+def refiner_defaults():
+    """Keep the setup UI usable before config exists or while it is invalid."""
+    try:
+        return {"refiner_thinking": load_bool("REFINER_THINKING")[0],
+                "refiner_json": load_bool("REFINER_JSON")[0]}
+    except (OSError, ValueError):
+        return {"refiner_thinking": False, "refiner_json": False}
+
+
+def merge_batch_options(saved, selected):
+    """Upgrade older batches with current defaults for newly introduced options."""
+    if not isinstance(saved, dict):
+        raise ValueError("Invalid saved caption options for this batch.")
+    merged = dict(saved)
+    for key in ("refiner_thinking", "refiner_json"):
+        merged.setdefault(key, selected[key])
+    if any(not isinstance(merged.get(key), bool) for key in selected):
+        raise ValueError("Invalid saved caption options for this batch.")
+    return {key: merged[key] for key in selected}

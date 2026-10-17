@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parent.parent
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".avif"}
-COMPANION_EXTENSIONS = {".txt", ".short", ".long", ".tag", ".combined", ".csv"}
+COMPANION_EXTENSIONS = {".txt", ".short", ".long", ".tag", ".combined", ".csv", ".json"}
 MAX_SCAN_CHARS = 200_000
 WORD_RE = re.compile(r"\b[^\W_]+(?:['’-][^\W_]+)*\b", re.UNICODE)
 SENTENCE_BREAK_RE = re.compile(r"[.!?]+(?:[\"')\]]+)?\s+")

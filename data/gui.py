@@ -1,12 +1,18 @@
 """Cross-platform GUI launcher for the VLTagger pipeline."""
 
+import crash_logging
+crash_logging.install()
+
 import os
 import queue
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import tkinter as tk
+import importlib.util
+from importlib.machinery import SourceFileLoader
 import json
 import re
 from pathlib import Path
@@ -16,12 +22,31 @@ from tkinter import messagebox, scrolledtext
 import ttkbootstrap as ttk
 
 from pipeline import ROOT, STAGES, stage_command, stage_description, stage_skip_reason
-from runtime_config import CONFIG_FILE, read_settings
+from runtime_config import CONFIG_FILE, read_settings, refiner_defaults, merge_batch_options
 from image_failures import ENV_KEY, reset_failures, failures
 from booru_setup import check_booru_access
 import caption_queue
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".avif", ".gif", ".webp"}
+SETTINGS_FILE = ROOT / "data" / "caches" / "captioner_settings.json"
+OPTION_NAMES = ("add_wd14_tags", "overwrite_danbooru_txt", "overwrite_caption_cache",
+                "overwrite_caption_files", "add_year_tag", "add_copyright_tags",
+                "refiner_thinking", "refiner_json")
+
+
+def read_captioner_settings(path):
+    settings = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(settings, dict):
+        raise ValueError("expected a settings object")
+    options = settings.get("options", {})
+    if not isinstance(options, dict):
+        raise ValueError("expected an options object")
+    for name in OPTION_NAMES:
+        if name in options and not isinstance(options[name], bool):
+            raise ValueError(f"{name} must be true or false")
+    if "theme" in settings and settings["theme"] not in ("bootstrap-dark", "bootstrap-light"):
+        raise ValueError("unrecognized theme")
+    return settings
 
 
 def image_count(folder):
@@ -63,11 +88,19 @@ def check_setup(require_images=True):
 
 
 class PipelineGUI:
-    def __init__(self, root):
+    def __init__(self, root, settings_file=None):
         self.root = root
+        self.settings_file = Path(settings_file) if settings_file is not None else SETTINGS_FILE
+        self._settings_save_error = None
+        self._settings_save_job = None
+        self._settings_dirty = set()
+        self._settings_missing = False
+        self._restoring_settings = False
         self.downloader_app = None
         self.copy_move_app = None
         self.dataset_manager_app = None
+        self.layout_viewer_app = None
+        self._layout_viewer_module = None
         self.worker_handle = None
         self.manual_download_handle = None
         self.active_batch = None
@@ -101,10 +134,18 @@ class PipelineGUI:
         self.notebook.pack(fill="x")
         run_page = ttk.Frame(self.notebook, padding=16)
         options_page = ttk.Frame(self.notebook, padding=12)
+        ttk.Label(options_page, text="Caption and tag options are saved automatically.",
+                  bootstyle="secondary").pack(anchor="w", padx=8, pady=(0, 4))
         self.advanced = ttk.ScrolledFrame(options_page, height=260, auto_hide=True, padding=8)
         self.advanced.pack(fill="both", expand=True)
+        tags_page = ttk.Frame(self.notebook, padding=12)
+        self.tag_options = ttk.ScrolledFrame(tags_page, height=260, auto_hide=True, padding=8)
+        self.tag_options.pack(fill="both", expand=True)
         self.notebook.add(run_page, text="Caption images")
         self.notebook.add(options_page, text="Options")
+        self.notebook.add(tags_page, text="Tag options")
+        ttk.Label(self.advanced, text="Caption refinement", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 12))
+        ttk.Label(self.tag_options, text="Tag files and metadata", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 12))
         steps_page = self.steps_page = ttk.Frame(self.notebook, padding=12)
         self.notebook.add(steps_page, text="Steps")
         self.steps = ttk.Treeview(steps_page, columns=("status", "detail"), height=9)
@@ -171,16 +212,25 @@ class PipelineGUI:
         self.add_advanced_option(
             "Add missing tags to existing tag files", self.add_wd14_tags,
             "Append missing tags with at least 0.91 confidence. Images without tags are always tagged.",
+            parent=self.tag_options,
         )
         self.overwrite_danbooru_txt = tk.BooleanVar()
         self.add_advanced_option(
             "Replace existing tags with fresh Danbooru or Gelbooru tags", self.overwrite_danbooru_txt,
             "On: replace matching tag files with tags from a found post. Off: keep existing tag files and skip their lookup.",
+            parent=self.tag_options,
         )
+        defaults = refiner_defaults()
+        self.refiner_thinking = tk.BooleanVar(value=defaults["refiner_thinking"])
+        self.add_advanced_option("Enable refiner thinking", self.refiner_thinking,
+                                 "Enable model reasoning for refinement and JSON. May take longer.")
+        self.refiner_json = tk.BooleanVar(value=defaults["refiner_json"])
+        self.add_advanced_option("Create .json files", self.refiner_json,
+                                 "Generate MOSS layout JSON with scene summary, elements, text and bounding boxes. Cache bypass also regenerates existing JSON files.")
         self.overwrite_caption_cache = tk.BooleanVar()
         self.add_advanced_option(
             "Bypass refinement caption cache", self.overwrite_caption_cache,
-            "Generate fresh refinement output when needed. To replace completed captions too, enable the option below. Torii reports are reused.",
+            "Bypass .long, .short and JSON caches. With JSON creation enabled, also regenerate existing JSON files. To replace completed long/short captions, enable the option below. Torii reports are reused.",
         )
         self.overwrite_caption_files = tk.BooleanVar(value=False)
         self.add_advanced_option(
@@ -191,11 +241,13 @@ class PipelineGUI:
         self.add_advanced_option(
             "Add upload year to .tag files", self.add_year_tag,
             "On: add year YYYY when a post date is available. Off: omit the year tag.",
+            parent=self.tag_options,
         )
         self.add_copyright_tags = tk.BooleanVar(value=False)
         self.add_advanced_option(
             "Include copyright and series tags in .tag files", self.add_copyright_tags,
             "On: include them in .tag and .combined files. Off: omit them there; source tags stay available.",
+            parent=self.tag_options,
         )
         controls = ttk.Frame(frame)
         controls.pack(fill="x", pady=(16, 8))
@@ -212,19 +264,19 @@ class PipelineGUI:
         results.pack(fill="x", pady=(0, 12))
         ttk.Button(results, text="Completed files", bootstyle="success-outline", command=lambda: self.open_folder("done")).pack(side="right")
         ttk.Button(results, text="Needs review", bootstyle="warning-outline", command=lambda: self.open_folder("captionReview")).pack(side="right", padx=8)
+        ttk.Button(results, text="Layout viewer", bootstyle="info-outline", command=self.open_layout_viewer).pack(side="right", padx=8)
         self.result_message = tk.StringVar(value="Completed images and captions appear here after processing.")
         ttk.Label(results, textvariable=self.result_message, wraplength=570).pack(side="left", fill="x", expand=True)
         logs = ttk.Labelframe(frame, text="Activity", padding=8)
         logs.pack(fill="both", expand=True)
         self.log = scrolledtext.ScrolledText(logs, state="disabled", wrap="word", height=8, font=("Consolas", 10))
         self.log.pack(fill="both", expand=True)
+        self.restore_settings()
         self.style_log()
         for stage in STAGES:
             self.steps.insert("", "end", iid=stage.script, text=stage.label, values=("Pending", ""))
-        for variable in (self.add_wd14_tags, self.overwrite_danbooru_txt,
-                         self.overwrite_caption_cache, self.overwrite_caption_files,
-                         self.add_year_tag, self.add_copyright_tags):
-            variable.trace_add("write", lambda *args: self.update_step_plan())
+        for name in OPTION_NAMES:
+            getattr(self, name).trace_add("write", lambda *args, name=name: self.options_changed(name))
         self.update_step_plan()
         root.after(100, self.read_events)
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -301,11 +353,12 @@ class PipelineGUI:
             self.progress.set(f"Queue unavailable: {error}")
         self.root.after(1000, self.poll_queue)
 
-    def add_advanced_option(self, title, variable, explanation):
-        widget = ttk.Checkbutton(self.advanced, text=title, variable=variable, bootstyle="primary-round-toggle")
+    def add_advanced_option(self, title, variable, explanation, parent=None):
+        parent = self.advanced if parent is None else parent
+        widget = ttk.Checkbutton(parent, text=title, variable=variable, bootstyle="primary-round-toggle")
         widget.pack(anchor="w", pady=(0, 3))
         self.option_widgets.append(widget)
-        ttk.Label(self.advanced, text=explanation, wraplength=850, bootstyle="secondary").pack(anchor="w", padx=(38, 0), pady=(0, 12))
+        ttk.Label(parent, text=explanation, wraplength=850, bootstyle="secondary").pack(anchor="w", padx=(38, 0), pady=(0, 12))
 
     def style_log(self):
         colors = self.root.style.colors
@@ -317,7 +370,95 @@ class PipelineGUI:
                     skip_wd14_high_confidence=not self.add_wd14_tags.get(),
                     add_year_tag=self.add_year_tag.get(),
                     add_copyright_tags=self.add_copyright_tags.get(),
-                    overwrite_caption_files=self.overwrite_caption_files.get())
+                    overwrite_caption_files=self.overwrite_caption_files.get(),
+                    refiner_thinking=self.refiner_thinking.get(), refiner_json=self.refiner_json.get())
+
+    def restore_settings(self):
+        try:
+            settings = read_captioner_settings(self.settings_file)
+        except FileNotFoundError:
+            self._settings_missing = True
+            return
+        except (OSError, ValueError, RecursionError) as error:
+            self.append(f"Could not load saved captioner settings: {error}. Using defaults.\n")
+            return
+        # Validate the entire document before replacing any defaults.
+        self._restoring_settings = True
+        try:
+            self.root.style.theme_use(settings.get("theme", self.root.style.theme_use()))
+            for name, value in settings.get("options", {}).items():
+                if name in OPTION_NAMES:
+                    getattr(self, name).set(value)
+        finally:
+            self._restoring_settings = False
+
+    def save_settings(self):
+        if self._settings_save_job is not None:
+            self.root.after_cancel(self._settings_save_job)
+            self._settings_save_job = None
+        if not self._settings_dirty and not self._settings_missing:
+            return
+        temporary = None
+        lock = None
+        try:
+            self.settings_file.parent.mkdir(parents=True, exist_ok=True)
+            lock = caption_queue.file_lock(self.settings_file.with_suffix(".lock"))
+            if lock is None:
+                if not self.closing:
+                    self._settings_save_job = self.root.after(100, self.save_settings)
+                    return
+                raise OSError("Another window is saving captioner settings; could not save before closing")
+            current_options = {name: getattr(self, name).get() for name in OPTION_NAMES}
+            current_theme = self.root.style.theme_use()
+            try:
+                settings = read_captioner_settings(self.settings_file)
+            except FileNotFoundError:
+                settings = {}
+            except (ValueError, RecursionError):
+                # An explicit change can repair invalid settings. Merely closing cannot.
+                if not self._settings_dirty:
+                    self._settings_missing = False
+                    return
+                settings = {}
+            else:
+                if not self._settings_dirty:
+                    self._settings_missing = False
+                    return
+            settings["options"] = {**current_options, **settings.get("options", {})}
+            settings.setdefault("theme", current_theme)
+            for name in self._settings_dirty:
+                if name == "theme":
+                    settings["theme"] = current_theme
+                else:
+                    settings["options"][name] = current_options[name]
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                             dir=self.settings_file.parent,
+                                             prefix=".captioner-settings-", suffix=".tmp", delete=False) as handle:
+                temporary = Path(handle.name)
+                handle.write(json.dumps(settings, indent=2) + "\n")
+            temporary.replace(self.settings_file)
+            self._settings_dirty.clear()
+            self._settings_missing = False
+            self._settings_save_error = None
+        except (OSError, ValueError, RecursionError) as error:
+            if str(error) != self._settings_save_error:
+                self.append(f"Could not save captioner settings: {error}\n")
+                self._settings_save_error = str(error)
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            if lock is not None:
+                lock.close()
+
+    def options_changed(self, name):
+        if self._restoring_settings:
+            return
+        self._settings_dirty.add(name)
+        self.update_step_plan()
+        self.save_settings()
 
     def update_step_plan(self):
         if self.running:
@@ -331,6 +472,14 @@ class PipelineGUI:
         current = self.root.style.theme_use()
         self.root.style.theme_use("bootstrap-light" if current == "bootstrap-dark" else "bootstrap-dark")
         self.style_log()
+        self._settings_dirty.add("theme")
+        self.save_settings()
+        if self.layout_viewer_app and self.layout_viewer_app.root.winfo_exists():
+            self.layout_viewer_app.apply_theme()
+        if self.downloader_app and self.downloader_app.root.winfo_exists():
+            self.downloader_app.apply_theme()
+        if self.dataset_manager_app and self.dataset_manager_app.root.winfo_exists():
+            self.dataset_manager_app.apply_theme()
 
     def open_folder(self, name):
         folder = ROOT / name
@@ -344,6 +493,22 @@ class PipelineGUI:
                 subprocess.Popen(["xdg-open", str(folder)])
         except OSError as error:
             messagebox.showerror("VLCaptioner", f"Could not open {folder}: {error}")
+
+    def open_layout_viewer(self):
+        viewer = ROOT / "data" / "layout_viewer.pyw"
+        try:
+            if self._layout_viewer_module is None:
+                loader = SourceFileLoader("vl_layout_viewer", str(viewer))
+                spec = importlib.util.spec_from_loader(loader.name, loader)
+                module = importlib.util.module_from_spec(spec)
+                loader.exec_module(module)
+                self._layout_viewer_module = module
+            self.open_tool(
+                "layout_viewer_app",
+                lambda window: self._layout_viewer_module.LayoutViewer(window),
+            )
+        except Exception as error:
+            messagebox.showerror("VLCaptioner", f"Could not open the layout viewer: {error}")
 
     def refresh_setup(self):
         if self.checking or self.running:
@@ -483,9 +648,7 @@ class PipelineGUI:
         self.run_images.mkdir(parents=True, exist_ok=True)
         selected = self.selected_options()
         saved = json.loads(batch["options"]) if batch and batch["options"] else selected
-        if not isinstance(saved, dict) or any(not isinstance(saved.get(key), bool) for key in selected):
-            raise ValueError("Invalid saved caption options for this batch.")
-        self.run_options = {key: saved[key] for key in selected}
+        self.run_options = merge_batch_options(saved, selected)
         self.failure_file = reset_failures()
         self.ready = False
         self.running = True
@@ -516,6 +679,7 @@ class PipelineGUI:
         self.copy_move_button.configure(state="disabled")
         self.status.configure(text="Running")
         self.progress.set("Starting pipeline…")
+        self.save_settings()
         threading.Thread(
             target=self.run_pipeline,
             args=(
@@ -526,6 +690,7 @@ class PipelineGUI:
                 self.run_options["add_year_tag"],
                 self.run_options["add_copyright_tags"],
                 self.run_options["overwrite_caption_files"],
+                self.run_options["refiner_thinking"], self.run_options["refiner_json"],
             ),
             daemon=True,
         ).start()
@@ -539,6 +704,8 @@ class PipelineGUI:
         add_year_tag=False,
         add_copyright_tags=False,
         overwrite_caption_files=False,
+        refiner_thinking=None,
+        refiner_json=None,
     ):
         code = 0
         shared_failure = False
@@ -547,7 +714,8 @@ class PipelineGUI:
                            overwrite_caption_cache=overwrite_caption_cache,
                            skip_wd14_high_confidence=skip_wd14_high_confidence,
                            add_year_tag=add_year_tag, add_copyright_tags=add_copyright_tags,
-                           overwrite_caption_files=overwrite_caption_files)
+                           overwrite_caption_files=overwrite_caption_files,
+                           refiner_thinking=refiner_thinking, refiner_json=refiner_json)
         try:
             for index, stage in enumerate(stages, 1):
                 if self.cancel_requested.is_set():
@@ -571,7 +739,7 @@ class PipelineGUI:
                     stage_command(stage, worker_python, overwrite_danbooru_txt,
                                   overwrite_caption_cache, skip_wd14_high_confidence,
                                   add_year_tag, add_copyright_tags,
-                                  overwrite_caption_files), cwd=ROOT,
+                                  overwrite_caption_files, refiner_thinking, refiner_json), cwd=ROOT,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                     encoding="utf-8", errors="replace",
                     env={**os.environ, "PYTHONUNBUFFERED": "1", ENV_KEY: self.failure_file, "VLCAPTIONER_IMAGES": str(self.run_images)}, **options,
@@ -730,6 +898,7 @@ class PipelineGUI:
         if self.closing:
             return
         self.closing = True
+        self.save_settings()
         self.queue_paused = True
         for app in (self.downloader_app, self.copy_move_app, self.dataset_manager_app):
             if app is not None and app.root.winfo_exists():
@@ -749,6 +918,7 @@ class PipelineGUI:
 
 def main(initial_tool=None):
     root = ttk.Window(themename="bootstrap-dark")
+    crash_logging.attach_tk(root)
     app = PipelineGUI(root)
     if initial_tool == "download":
         app.open_downloader_gui()

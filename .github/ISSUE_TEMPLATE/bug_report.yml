@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a reproducible problem with VLCaptioner.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: "Remove credentials, private addresses, and personal data from logs and screenshots. Use SECURITY.md for vulnerability reports."
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, repository revision, GPU, Ollama version, model names, and local or remote server.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the affected GUI option or command and a minimal input description.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Include the error and nearby Activity output, with sensitive information removed.

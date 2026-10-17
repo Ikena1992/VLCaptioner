@@ -1,6 +1,7 @@
 /images/
+/images[0-9]*/
 /done/
-/done1/
+/done[0-9]*/
 /captionReview/
 data/env/*
 data/env_joy/*
@@ -19,3 +20,12 @@ __pycache__/
 /test/
 /tests/
 /.test-tmp/
+
+# Local environment and editor artifacts
+.env
+.env.*
+.venv/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

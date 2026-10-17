@@ -21,13 +21,16 @@ def main() -> int:
     parser.add_argument("--overwrite-caption-files", action="store_true")
     parser.add_argument("--add-year-tag", action="store_true")
     parser.add_argument("--add-copyright-tags", action="store_true")
+    parser.add_argument("--refiner-thinking", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--refiner-json", action=argparse.BooleanOptionalAction, default=None)
     args = parser.parse_args()
     os.environ[ENV_KEY] = reset_failures()
     options = dict(overwrite_danbooru_txt=args.overwrite_danbooru_txt,
                    overwrite_caption_cache=args.overwrite_caption_cache,
                    skip_wd14_high_confidence=args.skip_wd14,
                    add_year_tag=args.add_year_tag, add_copyright_tags=args.add_copyright_tags,
-                   overwrite_caption_files=args.overwrite_caption_files)
+                   overwrite_caption_files=args.overwrite_caption_files,
+                   refiner_thinking=args.refiner_thinking, refiner_json=args.refiner_json)
     for stage in STAGES:
         reason = stage_skip_reason(stage, ROOT / "images", **options)
         if reason:
@@ -45,6 +48,7 @@ def main() -> int:
                 args.add_year_tag,
                 args.add_copyright_tags,
                 args.overwrite_caption_files,
+                args.refiner_thinking, args.refiner_json,
             ),
             cwd=ROOT,
         )

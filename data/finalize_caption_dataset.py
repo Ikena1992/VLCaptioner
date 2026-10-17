@@ -113,7 +113,7 @@ def finish_cleanup(stage):
     other = REVIEW_DIR if destination == DONE_DIR else DONE_DIR
     stems = {Path(name).stem for name in names}
     for stem in stems:
-        for extension in set(IMAGE_EXTENSIONS) | {".short", ".long", ".tag", ".combined", ".txt", ".review.json"}:
+        for extension in set(IMAGE_EXTENSIONS) | {".short", ".long", ".tag", ".combined", ".txt", ".review.json", ".json"}:
             (other / f"{stem}{extension}").unlink(missing_ok=True)
     shutil.rmtree(stage)
 
@@ -178,6 +178,9 @@ def process_caption_pair(short_path: Path, report_success: bool = True) -> bool:
             return False
 
         sources = [short_path, image_path, tag_path]
+        json_path = image_path.with_suffix(".json")
+        if json_path.exists():
+            sources.append(json_path)
         if long_path.exists():
             sources.append(long_path)
         if txt_path.exists():
