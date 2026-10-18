@@ -6,13 +6,13 @@ problem and proposed behavior first.
 
 ## Development setup
 
-Follow the [installation guide](docs/setup.md), copy `config.example.txt` to
+Follow the [installation guide](../docs/setup.md), copy `config.example.txt` to
 `config.txt`, and use the Python environment in `data/env`. Run commands from
 the repository root. Keep credentials in your local configuration.
 
 The GUI entry point is `data/GUI.pyw`; the command-line entry point is
 `data/pipeline_runner.py`. Both use the stages defined in `data/pipeline.py`.
-See the [architecture guide](docs/development.md) for a map of the code.
+See the [architecture guide](../docs/development.md) for a map of the code.
 
 ## Making a change
 

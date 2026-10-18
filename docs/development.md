@@ -1,6 +1,6 @@
 # Development guide
 
-[Back to README](../README.md) · [Contributing](../CONTRIBUTING.md)
+[Back to README](../README.md) · [Contributing](../.github/CONTRIBUTING.md)
 
 VLCaptioner is a Python desktop application with a shared command-line pipeline.
 The `data/` directory contains application code as well as ignored runtime folders.
@@ -46,7 +46,7 @@ Images enter through `images/`; completed sets go to `done/` and flagged sets to
 `data/env/`, `data/models/`, and writable `data/caches/` contents are local runtime
 assets. The explicitly allowed SQLite seed files are versioned to initialize caches.
 
-Keep tests in the local-only folders described in [CONTRIBUTING.md](../CONTRIBUTING.md).
+Keep tests in the local-only folders described in [CONTRIBUTING.md](../.github/CONTRIBUTING.md).
 
 ## Automated checks
 

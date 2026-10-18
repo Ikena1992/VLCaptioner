@@ -292,10 +292,10 @@ See the [troubleshooting guide](docs/troubleshooting.md) for commands and detail
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, local validation,
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for development setup, local validation,
 and pull request guidance. The [development guide](docs/development.md) maps the
 main modules. Use [GitHub issues](https://github.com/Ikena1992/VLCaptioner/issues)
-for bugs and feature requests, and follow the [security policy](SECURITY.md) for
+for bugs and feature requests, and follow the [security policy](.github/SECURITY.md) for
 vulnerability reports.
 
 ## License
