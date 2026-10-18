@@ -172,8 +172,8 @@ Enable caption overwrite to replace existing captions, and cache bypass to reque
 fresh model output. These controls are independent.
 
 For JSON coordinates, validation, thinking behavior, and visible-text handling,
-see [advanced captioning](docs/advanced.md). Use **Layout viewer** in the GUI or
-run `LayoutViewer.cmd` to inspect JSON boxes on their source image.
+see [advanced captioning](docs/advanced.md). Click **Layout viewer** in the GUI's
+**Results** section to inspect JSON boxes on their source image.
 
 ## Output files
 

@@ -76,7 +76,8 @@ processing time; `OLLAMA_TIMEOUT_SECONDS` still applies to each request.
 
 ### Inspect layout JSON
 
-To inspect generated layout JSON on its source image, run `LayoutViewer.cmd`.
+To inspect generated layout JSON on its source image, click **Layout viewer**
+in the GUI's **Results** section.
 Choose an image to load its matching `NAME.json` sidecar automatically, or open
 a JSON file directly. The viewer draws every item box over the image; select an
 item to read its caption prompt and exact visible text. The scene summary appears
