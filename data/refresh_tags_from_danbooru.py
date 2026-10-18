@@ -1,3 +1,5 @@
+from file_io import atomic_write_text, atomic_output
+from dataset_files import IMAGE_EXTENSIONS
 from runtime_config import pipeline_images
 from quality_tags import get_quality_tag
 import os
@@ -16,15 +18,6 @@ IMAGE_FOLDER = pipeline_images().as_posix()
 IMAGE_FOLDER = os.path.abspath(IMAGE_FOLDER)
 os.makedirs(IMAGE_FOLDER, exist_ok=True)
 
-IMAGE_EXTENSIONS = (
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".bmp",
-    ".webp",
-    ".tiff",
-)
 
 REQUEST_DELAY_SECONDS = 0.5
 
@@ -383,9 +376,8 @@ def save_tags(md5_hash, tags):
             "created_at": tags.get("created_at", ""),
             "year tag": get_year_tag(tags.get("created_at", "")),
         }
-        with open(txt_path, "w", encoding="utf-8") as f_txt:
-            f_txt.write(", ".join(all_tags) + "\n")
-        with open(csv_path, "w", newline="", encoding="utf-8") as handle:
+        atomic_write_text(txt_path, ", ".join(all_tags) + "\n")
+        with atomic_output(csv_path, newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(row))
             writer.writeheader()
             writer.writerow(row)

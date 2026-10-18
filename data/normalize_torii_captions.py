@@ -1,3 +1,4 @@
+from file_io import atomic_write_text
 from runtime_config import pipeline_images
 from pathlib import Path
 from tqdm import tqdm
@@ -90,7 +91,7 @@ for filepath in tqdm(txt_files, desc="Processing files", unit="file"):
         if content.endswith('"'):
             content = content[:-1]
 
-        filepath.write_text(content, encoding="utf-8")
+        atomic_write_text(filepath, content)
     except Exception as error:
         skip_image(filepath, error)
 

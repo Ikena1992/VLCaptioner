@@ -1,6 +1,5 @@
 import queue
 import re
-import shutil
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -8,9 +7,8 @@ from tkinter import filedialog, messagebox
 
 import ttkbootstrap as ttk
 import caption_queue
+from dataset_transfer import IMAGE_EXTENSIONS, SIDECAR_EXTENSIONS, matches, transfer
 
-IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.avif', '.tif', '.tiff')
-SIDECAR_EXTENSIONS = ('.txt', '.combined', '.long', '.short', '.tag', '.naturallanguage')
 GIF_PATH = Path(__file__).resolve().parent / 'dance.gif'
 
 
@@ -21,79 +19,6 @@ def normalize_target_extension(value):
     if not re.fullmatch(r'\.[a-z0-9]+', extension):
         raise ValueError('Enter one file extension, such as .txt or .tag.')
     return extension
-
-
-def matches(content, keywords, excluded, search_mode, contains):
-    content = content.lower()
-    tags = {tag.strip() for tag in content.replace('\n', ',').split(',') if tag.strip()}
-    tag_match = bool(keywords) and (all(word in tags for word in keywords) if search_mode == 'AND'
-                                   else any(word in tags for word in keywords))
-    return (tag_match or bool(contains and contains in content)) and not any(word in tags for word in excluded)
-
-
-def transfer(settings, cancel, emit):
-    """Perform filesystem work only; report results to the UI through its queue."""
-    scanned = matched = transferred = skipped = errors = 0
-    try:
-        source, destination = settings['source'], settings['destination']
-        files = sorted((path for path in source.iterdir() if path.is_file()), key=lambda path: path.name.lower())
-        candidates = [path for path in files if path.suffix.lower() == settings['extension']]
-        groups = {}
-        for path in files:
-            groups.setdefault(path.stem.casefold(), []).append(path)
-        emit(('progress', 0, len(candidates), 'Scanning caption files…'))
-        for caption in candidates:
-            if cancel.is_set():
-                break
-            scanned += 1
-            try:
-                content = caption.read_text(encoding='utf-8-sig')
-                if matches(content, settings['keywords'], settings['excluded'], settings['mode'], settings['contains']):
-                    matched += 1
-                    bundle = [path for path in groups[caption.stem.casefold()]
-                              if path == caption or path.suffix.lower() in IMAGE_EXTENSIONS + SIDECAR_EXTENSIONS]
-                    # Check the whole group before moving anything. Never overwrite a destination file.
-                    conflicts = [path.name for path in bundle if (destination / path.name).exists()]
-                    if conflicts:
-                        skipped += 1
-                        emit(('log', f'Skipped {caption.stem}: destination already contains {", ".join(conflicts)}'))
-                    else:
-                        # Copy/move images first so a failed image transfer leaves its captions in place.
-                        bundle.sort(key=lambda path: path.suffix.lower() not in IMAGE_EXTENSIONS)
-                        for path in bundle:
-                            target = destination / path.name
-                            if settings['action'] == 'copy':
-                                # Exclusive creation also protects against files created after the preflight check.
-                                with path.open('rb') as reader, target.open('xb') as writer:
-                                    try:
-                                        shutil.copyfileobj(reader, writer)
-                                    except Exception:
-                                        writer.close()
-                                        target.unlink(missing_ok=True)
-                                        raise
-                                shutil.copystat(path, target)
-                            else:
-                                # Copy first, then remove the source only after the complete file is saved.
-                                with path.open('rb') as reader, target.open('xb') as writer:
-                                    try:
-                                        shutil.copyfileobj(reader, writer)
-                                    except Exception:
-                                        writer.close()
-                                        target.unlink(missing_ok=True)
-                                        raise
-                                shutil.copystat(path, target)
-                                path.unlink()
-                            transferred += 1
-                        emit(('log', f'{"Copied" if settings["action"] == "copy" else "Moved"}: {caption.stem} ({len(bundle)} files)'))
-            except Exception as error:
-                errors += 1
-                emit(('log', f'Error for {caption.name}: {error}. Continuing with the next caption.'))
-            emit(('progress', scanned, len(candidates), caption.name))
-    except Exception as error:
-        errors += 1
-        emit(('log', f'Transfer could not continue: {error}'))
-    finally:
-        emit(('done', cancel.is_set(), scanned, matched, transferred, skipped, errors))
 
 
 class CopyMoveApp:

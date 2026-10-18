@@ -1,4 +1,5 @@
 """Share per-image failures between subprocesses in one pipeline run."""
+from file_io import atomic_write_json
 import json
 import os
 from pathlib import Path
@@ -43,7 +44,5 @@ def skip_image(image, error):
         records = failures(path)
         records[image_key(image)] = str(error)
         target = Path(path)
-        temporary = target.with_suffix(".tmp")
-        temporary.write_text(json.dumps(records), encoding="utf-8")
-        temporary.replace(target)
+        atomic_write_json(target, records)
     print(f"Skipped image: {Path(image).name}: {error}. Continuing with remaining images.", flush=True)

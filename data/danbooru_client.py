@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import requests
 import time
+import math
 from threading import Lock
 
 from runtime_config import CONFIG_FILE, read_settings
@@ -82,9 +83,13 @@ def danbooru_get(url: str, **kwargs) -> requests.Response:
 
         retry_after = response.headers.get("Retry-After", "")
         try:
-            retry_delay = max(float(retry_after), 2 ** (attempt + 1))
+            retry_delay = float(retry_after)
+            if not math.isfinite(retry_delay):
+                raise ValueError("Non-finite Retry-After")
+            retry_delay = max(retry_delay, 2 ** (attempt + 1))
         except (TypeError, ValueError):
             retry_delay = 2 ** (attempt + 1)
+        response.close()
         time.sleep(retry_delay)
 
     return response

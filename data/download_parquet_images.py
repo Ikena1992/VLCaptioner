@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+from dataset_files import IMAGE_EXTENSIONS
+from file_io import atomic_output
+
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -16,16 +19,6 @@ DATA_DIR = ROOT / "data"
 IMAGES_DIR = ROOT / "images"
 DONE_DIR = ROOT / "done"
 PARQUET_DIR = DATA_DIR / "parquet"
-IMAGE_EXTENSIONS = {
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".webp",
-    ".bmp",
-    ".gif",
-    ".tif",
-    ".tiff",
-}
 
 sys.path.insert(0, str(DATA_DIR))
 
@@ -94,26 +87,20 @@ def download_image(md5: str, post: dict, destination: Path) -> Path:
         raise RuntimeError(f"unsupported image type: {post.get('file_ext', 'unknown')}")
 
     output_path = destination / f"{md5}{extension}"
-    temporary_path = destination / f".{md5}{extension}.download"
-    try:
-        with requests.get(
-            url,
-            headers={"User-Agent": get_danbooru_headers()["User-Agent"]},
-            stream=True,
-            timeout=(10, 180),
-        ) as response:
-            response.raise_for_status()
-            with temporary_path.open("wb") as output:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if chunk:
-                        output.write(chunk)
-        if not temporary_path.stat().st_size:
-            raise RuntimeError("downloaded file is empty")
-        temporary_path.replace(output_path)
-        return output_path
-    except Exception:
-        temporary_path.unlink(missing_ok=True)
-        raise
+    with requests.get(
+        url,
+        headers={"User-Agent": get_danbooru_headers()["User-Agent"]},
+        stream=True,
+        timeout=(10, 180),
+    ) as response:
+        response.raise_for_status()
+        with atomic_output(output_path, mode="wb", overwrite=False) as output:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    output.write(chunk)
+            if not output.tell():
+                raise RuntimeError("downloaded file is empty")
+    return output_path
 
 
 def main() -> int:

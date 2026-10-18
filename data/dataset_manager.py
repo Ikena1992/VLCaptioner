@@ -1,9 +1,11 @@
 """Read-only local image/tag dataset browser. Run with Python (Tk + Pillow)."""
 from __future__ import annotations
 
+from dataset_files import IMAGE_EXTENSIONS as EXTENSIONS, is_source_tag_file
+
 import csv
 import json
-import tempfile
+from file_io import atomic_write_json, atomic_output
 from contextlib import closing
 import subprocess
 import sys
@@ -21,7 +23,6 @@ import ttkbootstrap as ttk
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT
-EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff', '.avif'}
 SETTINGS_FILE = ROOT / 'data' / 'caches' / 'dataset_manager_settings.json'
 CATEGORIES = {0: 'General', 1: 'Artist', 3: 'Copyright', 4: 'Character', 5: 'Meta'}
 
@@ -96,8 +97,7 @@ def scan_dataset(folders, progress=lambda value: None, cancelled=lambda: False):
             dirs.sort()
             parent = Path(parent)
             txt = {Path(name).stem.casefold(): parent / name for name in sorted(names)
-                   if Path(name).suffix.lower() == '.txt'
-                   and not Path(name).stem.lower().endswith(('.tag', '.combined', '.long', '.short'))}
+                   if is_source_tag_file(name)}
             image_stems = set()
             for name in sorted(names):
                 if cancelled():
@@ -392,23 +392,14 @@ class DatasetManager(ttk.Frame):
             self.valid_count_limits = (settings['minimum'], settings['maximum'])
         except ValueError:
             settings['minimum'], settings['maximum'] = self.valid_count_limits
-        temporary = None
         try:
             self.settings_file.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=self.settings_file.parent, prefix='.dataset-settings-', suffix='.tmp', delete=False) as output:
-                temporary = Path(output.name)
-                json.dump(settings, output, ensure_ascii=False, indent=2)
-            temporary.replace(self.settings_file)
+            atomic_write_json(self.settings_file, settings, ensure_ascii=False, indent=2,
+                              prefix='.dataset-settings-')
             if notify:
                 self.status.set('Settings saved.')
         except OSError as error:
             messagebox.showwarning('Settings not saved', str(error), parent=self.root)
-        finally:
-            if temporary:
-                try:
-                    temporary.unlink(missing_ok=True)
-                except OSError:
-                    pass
 
     def configure_dataset_columns(self):
         columns = ('tag', 'category', 'images', 'percent') + tuple(f'folder{i}' for i in range(len(self.folders)))
@@ -666,25 +657,15 @@ class DatasetManager(ttk.Frame):
         rows = list(self.visible_rows)
         path = filedialog.asksaveasfilename(parent=self.root, defaultextension='.csv', initialfile='dataset_tag_counts.csv', filetypes=[('CSV', '*.csv')])
         if path:
-            temporary = None
             try:
                 destination = Path(path)
-                with tempfile.NamedTemporaryFile(mode='w', newline='', encoding='utf-8-sig',
-                                                 dir=destination.parent, prefix='.dataset-export-',
-                                                 suffix='.tmp', delete=False) as handle:
-                    temporary = Path(handle.name)
+                with atomic_output(destination, newline='', encoding='utf-8-sig',
+                                   prefix='.dataset-export-') as handle:
                     writer = csv.writer(handle)
                     writer.writerow(headers)
                     writer.writerows(rows)
-                temporary.replace(destination)
             except OSError as error:
                 messagebox.showerror('Export failed', str(error), parent=self.root)
-            finally:
-                if temporary:
-                    try:
-                        temporary.unlink(missing_ok=True)
-                    except OSError:
-                        pass
 
 
 if __name__ == '__main__':

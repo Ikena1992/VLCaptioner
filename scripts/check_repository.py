@@ -24,7 +24,7 @@ def is_local_file(name):
         return False
     if parts[0] in LOCAL_DIRS or LOCAL_DATA.fullmatch(parts[0]):
         return True
-    if name in {"config.txt", "data/danbooru_credentials.py", ".env"}:
+    if name in {"AGENTS.md", "config.txt", "data/danbooru_credentials.py", ".env"}:
         return True
     if parts[0].startswith(".env."):
         return True

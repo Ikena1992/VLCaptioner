@@ -1,4 +1,5 @@
 """Durable requests shared by the downloader and captioning windows."""
+from dataset_files import IMAGE_EXTENSIONS
 import json
 import os
 import sqlite3
@@ -119,7 +120,7 @@ def recover_downloads():
         try:
             folder = QUEUE_DIR / job["id"]
             count = sum(p.is_file() and p.suffix.lower() in
-                        {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"}
+                        IMAGE_EXTENSIONS
                         for p in folder.iterdir())
             transition(job["id"], ("Downloading",), "Stopped" if count else "Cancelled", count)
         finally:

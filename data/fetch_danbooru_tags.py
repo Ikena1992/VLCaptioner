@@ -1,10 +1,11 @@
+from file_io import atomic_write as shared_atomic_write
+from dataset_files import IMAGE_EXTENSIONS
 from runtime_config import pipeline_images
 from quality_tags import get_quality_tag, normalize_quality_tag
 import os
 import csv
 import argparse
 import requests
-import tempfile
 from pathlib import Path
 from refresh_tags_from_danbooru import post_to_tags, get_period_tag, get_rating_tags
 from tqdm import tqdm
@@ -48,18 +49,8 @@ def format_tags(tag_string):
 
 
 def atomic_write(path, write):
-    """Keep existing files intact if writing fails, using a unique temporary file."""
-    path = Path(path)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", newline="", encoding="utf-8",
-                                         dir=path.parent, prefix=".source-tags-", suffix=".tmp", delete=False) as handle:
-            temporary = Path(handle.name)
-            write(handle)
-        temporary.replace(path)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    """Write source tags with the historical CSV/newline settings."""
+    shared_atomic_write(path, write, newline="", prefix=".source-tags-")
 
 def save_tags(md5_hash, tags, overwrite_existing_txt=False, image_folder=None):
     """Save CSV and TXT files for an image's tags."""
@@ -103,7 +94,6 @@ def save_tags(md5_hash, tags, overwrite_existing_txt=False, image_folder=None):
 
 # ---------------- MAIN ----------------
 def main(overwrite_existing_txt=False):
-    IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff")
 
     files = [f for f in os.listdir(IMAGE_FOLDER)
              if f.lower().endswith(IMAGE_EXTENSIONS)]

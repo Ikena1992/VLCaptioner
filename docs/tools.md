@@ -132,6 +132,14 @@ keeps matching images and sidecar files together. Enter another extension, such
 as `.tag` or `.combined`, to search those files instead.
 Click **Copy / move by tags** in the captioning GUI's **3. Add images** box.
 
+Caption files, layout `.json`, `.review.json`, metadata `.csv`, and intermediate
+`.toriiOutput` sidecars travel with the matching image.
+Each complete set is copied and checked before move cleanup removes any source
+files. If a transfer stops midway, retry with the same source and destination
+folders to recover it, even if its selected caption has already moved.
+Keep any `.vlcaptioner-transfer-*` folders in the destination until recovery
+finishes. Existing destination files are skipped.
+
 ### Export captions as a ZIP
 
 Run `scripts/2_createZipFile.bat` on Windows or
@@ -160,6 +168,10 @@ either way. Omit it to also update existing tag files. Use
 source tags or `--overwrite-caption-cache` to bypass cached captions when
 generating. Use `--overwrite-caption-files` to replace existing
 `.long` and `.short` files.
+
+The CLI reserves the same operation locks as the GUI for the entire run. If
+captioning, a file transfer, or downloading is already active, it exits with
+code `1` and explains which operation must finish first.
 
 Refinement cache matching uses the image contents, output kind, model, and prompt.
 Moving or renaming an unchanged image does not invalidate its cached output.

@@ -1,9 +1,10 @@
+from file_io import atomic_write_text
+from dataset_files import IMAGE_EXTENSIONS
 from runtime_config import pipeline_images
 from source_tag_file import MARKER, read_source_tags, has_source_tags
 import argparse
 import sys
 import os
-import tempfile
 import json
 from pathlib import Path
 from model_access import ModelAccessError, load_with_access_error
@@ -35,16 +36,6 @@ IMAGE_FOLDER = IMAGE_FOLDER.resolve()
 
 model_cache_dir = SCRIPT_DIR / "models/convnextv2_huge.dbv4-full"
 
-IMAGE_EXTENSIONS = {
-    ".avif",
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".webp",
-    ".bmp",
-    ".tif",
-    ".tiff",
-}
 
 INCLUDE_GENERAL_TAGS = True
 INCLUDE_CHARACTER_TAGS = True
@@ -404,20 +395,7 @@ def split_tags(content: str) -> list[str]:
 
 def write_tags_atomically(txt_path: Path, content: str):
     """Keep the previous tag file intact if writing or replacement fails."""
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=txt_path.parent,
-            prefix=f".{txt_path.name}.", suffix=".tmp", delete=False,
-        ) as output:
-            temporary_path = Path(output.name)
-            output.write(content)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary_path, txt_path)
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+    atomic_write_text(txt_path, content, fsync=True)
 
 
 def append_missing_tags(txt_path: Path, predicted_tags: list[str]) -> list[str]:

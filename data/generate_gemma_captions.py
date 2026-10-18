@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from file_io import file_hash, atomic_write_text
+from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS, companion_paths
+
 from runtime_config import load_bool, pipeline_images
 from image_failures import is_skipped, skip_image
 
@@ -34,7 +37,6 @@ IMAGES_DIR = pipeline_images()
 CAPTION_CACHE = SCRIPT_DIR / "caches" / "captionResultsCache.sqlite3"
 CAPTION_MAX_NEW_TOKENS = {"short": 384, "long": 1536}
 DEFAULT_CAPTION_CONTEXT_SIZE = 65536
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
 class CaptionReviewError(RuntimeError):
@@ -70,9 +72,7 @@ def validate_caption(text, kind, payload=None):
 
 
 def send_caption_to_review(image_path, error):
-    extensions = {".txt", ".short", ".long", ".tag", ".combined", ".csv", ".toriiOutput", ".json"}
-    sources = [image_path] + [image_path.with_suffix(ext) for ext in extensions
-                              if image_path.with_suffix(ext).is_file()]
+    sources = [image_path, *companion_paths(image_path)]
     finalizer.publish_files(sources, {
         image_path.with_suffix(f".{error.kind}").name: error.text,
         image_path.with_suffix(".review.json").name: json.dumps(
@@ -115,14 +115,6 @@ def initialize_cache(cache_path=CAPTION_CACHE):
         database.commit()
     finally:
         database.close()
-
-
-def file_hash(image_path):
-    digest = hashlib.sha256()
-    with image_path.open("rb") as image_file:
-        for chunk in iter(lambda: image_file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def caption_reference(text, artist_names=()):
@@ -302,9 +294,9 @@ def write_result(image_path, short_text, long_text, artist_names=None, preserve_
     artist_names = artist_names or []
     short_text = add_artist_prefix(short_text, artist_names)
     long_text = add_artist_prefix(long_text, artist_names)
-    image_path.with_suffix(".short").write_text(short_text + "\n", encoding="utf-8")
+    atomic_write_text(image_path.with_suffix(".short"), short_text + "\n")
     if not preserve_existing_long:
-        image_path.with_suffix(".long").write_text(long_text + "\n", encoding="utf-8")
+        atomic_write_text(image_path.with_suffix(".long"), long_text + "\n")
 
 
 def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=False, overwrite_caption_files=False, prepare_tags=None, create_json=False):
@@ -601,7 +593,7 @@ def process_image(
         )
     long_text = validate_caption(long_text, "long")
     if not reuse_existing_long and not overwrite_caption_files:
-        long_path.write_text(long_text + "\n", encoding="utf-8")
+        atomic_write_text(long_path, long_text + "\n")
     short_text = generate_caption(
         client,
         image_path,

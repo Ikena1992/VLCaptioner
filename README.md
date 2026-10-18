@@ -37,7 +37,9 @@ GPU is recommended. Ollama can run locally or on another computer; the optional
 AnimeTimm/WD14 tagger runs on the VLCaptioner computer and also supports CPU.
 Both installers install CUDA-enabled PyTorch locally.
 
-### 1. Install
+### 1. Clone and install
+
+Clone the repository and enter the project folder:
 
 ```console
 git clone https://github.com/Ikena1992/VLCaptioner.git
@@ -108,7 +110,8 @@ Launch the GUI from the project folder:
 finalization moves processed sets out of `images/`. Non-WebP images are resized
 to fit within 3000 × 3000 pixels and transparency is flattened onto white.
 Existing WebP files are left unchanged by conversion. Supported inputs:
-`.jpg`, `.jpeg`, `.png`, `.bmp`, `.tiff`, `.gif`, `.webp`; animations are not preserved.
+`.jpg`, `.jpeg`, `.png`, `.bmp`, `.tif`, `.tiff`, `.avif`, `.gif`, `.webp`;
+animations are not preserved.
 Use unique base filenames to avoid image and companion-file conflicts.
 
 ## Updating

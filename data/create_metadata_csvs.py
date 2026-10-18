@@ -1,12 +1,10 @@
+from file_io import atomic_output
 from runtime_config import pipeline_images
 import os
 import csv
-import tempfile
 from pathlib import Path
 from image_failures import is_skipped, skip_image
 import logging
-import requests
-import time
 from tqdm import tqdm
 from danbooru_client import danbooru_get
 from danbooru_cache import TagCategoryCache
@@ -84,12 +82,9 @@ period_tags_set = {
     "old",
 }
 
-# Danbooru may return HTTP 429 when uncached tags are queried in a tight loop.
-# Keep category lookups comfortably below the request-rate limit and retry a
-# throttled request instead of presenting a valid tag as unresolved.
+# The shared client owns the single rate-limit/retry budget for each lookup.
 CATEGORY_REQUEST_INTERVAL_SECONDS = 0.35
 CATEGORY_RATE_LIMIT_RETRIES = 4
-last_category_request_time = 0.0
 
 
 def normalize_for_danbooru(tag):
@@ -107,7 +102,6 @@ def normalize_for_danbooru(tag):
 
 def get_tag_category(tag):
     """Get a confirmed Danbooru category, or None when it cannot be resolved."""
-    global last_category_request_time
     cache_key = normalize_for_danbooru(tag)
 
     # Backwards compatibility for older cache entries that used the TXT tag as key.
@@ -125,43 +119,16 @@ def get_tag_category(tag):
         tag_cache.pop(tag, None)
 
     try:
-        response = None
-        for attempt in range(CATEGORY_RATE_LIMIT_RETRIES + 1):
-            wait_seconds = CATEGORY_REQUEST_INTERVAL_SECONDS - (
-                time.monotonic() - last_category_request_time
-            )
-            if wait_seconds > 0:
-                time.sleep(wait_seconds)
-
-            response = danbooru_get(
-                "https://danbooru.donmai.us/tags.json",
-                params={"search[name]": cache_key},
-                timeout=30,
-            )
-            last_category_request_time = time.monotonic()
-
-            if response.status_code != 429:
-                break
-
-            retry_after = response.headers.get("Retry-After", "")
-            try:
-                retry_delay = max(float(retry_after), 2 ** (attempt + 1))
-            except ValueError:
-                retry_delay = 2 ** (attempt + 1)
-            logger.warning(
-                "Category lookup rate-limited for %r; retrying in %.1fs",
-                tag,
-                retry_delay,
-            )
-            if attempt < CATEGORY_RATE_LIMIT_RETRIES:
-                time.sleep(retry_delay)
-
-        if response is None or response.status_code != 200:
-            status = response.status_code if response is not None else "unknown"
-            logger.warning("Category lookup failed for %r: HTTP %s", tag, status)
-            return None
-
-        data = response.json()
+        with danbooru_get(
+            "https://danbooru.donmai.us/tags.json",
+            params={"search[name]": cache_key}, timeout=30,
+            request_interval=CATEGORY_REQUEST_INTERVAL_SECONDS,
+            rate_limit_retries=CATEGORY_RATE_LIMIT_RETRIES,
+        ) as response:
+            if response.status_code != 200:
+                logger.warning("Category lookup failed for %r: HTTP %s", tag, response.status_code)
+                return None
+            data = response.json()
         if not data or "category" not in data[0]:
             logger.warning("Category lookup returned no usable result for %r", tag)
             return None
@@ -282,30 +249,15 @@ TAG_COLUMNS = ("characters", "copyright", "artists", "general", "meta",
 
 def write_csv(csv_file_path, row):
     """Publish complete metadata only if no destination already exists."""
-    destination = Path(csv_file_path)
-    temporary = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", newline="", encoding="utf-8",
-                                         dir=destination.parent, suffix=".tmp", delete=False) as handle:
-            temporary = Path(handle.name)
+        with atomic_output(csv_file_path, newline="", overwrite=False, fsync=True) as handle:
             fields = list(dict.fromkeys([*CSV_FIELDNAMES, *row]))
             writer = csv.DictWriter(handle, fieldnames=fields)
             writer.writeheader()
             writer.writerow(row)
-            handle.flush()
-            os.fsync(handle.fileno())
-        try:
-            if os.name == "nt":
-                # Windows rename is atomic and refuses an existing destination.
-                os.rename(temporary, destination)
-            else:
-                os.link(temporary, destination)
-        except FileExistsError:
-            return False
-        return True
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    except FileExistsError:
+        return False
+    return True
 
 
 def main():

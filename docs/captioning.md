@@ -8,8 +8,8 @@ The conversion step saves images as
 WebP, resizes images to fit within 3000 × 3000 pixels, and flattens transparency
 onto white. JPEG inputs may use lossy WebP compression to reduce file size.
 Existing WebP files are left unchanged by this conversion step.
-Supported input extensions are `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tiff`, `.gif`,
-and `.webp`. Animated images are not preserved as animations.
+Supported input extensions are `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tif`, `.tiff`,
+`.avif`, `.gif`, and `.webp`. Animated images are not preserved as animations.
 
 Work from copies if you need to retain the source files. Successful conversion
 replaces each non-WebP input in `images/` with a WebP file. Successful
@@ -115,6 +115,17 @@ cache** if you want fresh model output instead of a matching cached result.
 
 After an interrupted save, `.finalize-*` folders in `done/` hold the recovery
 information needed by the next run. Removing them prevents automatic recovery.
+Recovery uses the original batch folder and file hashes recorded in the journal.
+If source files were edited after publication, the whole source set is retained
+for retry. Changed destination files stop cleanup and preserve the originals.
+Older journals without source identity preserve the originals and log a warning.
+Journal files are stored separately from image sidecars, so layouts named
+`transaction.json` or `committed.json` cannot overwrite recovery information.
+
+Torii reports are saved and cached only after both analysis responses finish
+without truncation. Empty or truncated responses leave the image for a later
+run; other images continue. Report files are published atomically so interrupted
+writes cannot leave a partial report for the next run to reuse.
 
 ## Output files
 

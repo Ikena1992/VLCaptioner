@@ -1,4 +1,5 @@
 """Cross-platform GUI launcher for the VLTagger pipeline."""
+from dataset_files import IMAGE_EXTENSIONS
 
 import crash_logging
 crash_logging.install()
@@ -8,7 +9,7 @@ import queue
 import signal
 import subprocess
 import sys
-import tempfile
+from file_io import atomic_write_json
 import threading
 import tkinter as tk
 import importlib.util
@@ -27,7 +28,6 @@ from image_failures import ENV_KEY, reset_failures, failures
 from booru_setup import check_booru_access
 import caption_queue
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".avif", ".gif", ".webp"}
 SETTINGS_FILE = ROOT / "data" / "caches" / "captioner_settings.json"
 OPTION_NAMES = ("add_wd14_tags", "overwrite_danbooru_txt", "overwrite_caption_cache",
                 "overwrite_caption_files", "add_year_tag", "add_copyright_tags",
@@ -398,7 +398,6 @@ class PipelineGUI:
             self._settings_save_job = None
         if not self._settings_dirty and not self._settings_missing:
             return
-        temporary = None
         lock = None
         try:
             self.settings_file.parent.mkdir(parents=True, exist_ok=True)
@@ -431,12 +430,8 @@ class PipelineGUI:
                     settings["theme"] = current_theme
                 else:
                     settings["options"][name] = current_options[name]
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
-                                             dir=self.settings_file.parent,
-                                             prefix=".captioner-settings-", suffix=".tmp", delete=False) as handle:
-                temporary = Path(handle.name)
-                handle.write(json.dumps(settings, indent=2) + "\n")
-            temporary.replace(self.settings_file)
+            atomic_write_json(self.settings_file, settings, indent=2, trailing_newline=True,
+                              prefix=".captioner-settings-")
             self._settings_dirty.clear()
             self._settings_missing = False
             self._settings_save_error = None
@@ -445,11 +440,6 @@ class PipelineGUI:
                 self.append(f"Could not save captioner settings: {error}\n")
                 self._settings_save_error = str(error)
         finally:
-            if temporary is not None:
-                try:
-                    temporary.unlink(missing_ok=True)
-                except OSError:
-                    pass
             if lock is not None:
                 lock.close()
 

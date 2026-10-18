@@ -26,6 +26,8 @@ Important:
 
 from __future__ import annotations
 
+from file_io import atomic_write_text
+
 from runtime_config import pipeline_images
 
 from quality_tags import get_quality_tag, normalize_quality_tag
@@ -34,7 +36,6 @@ from year_tags import get_year_tag
 import csv
 import os
 import random
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -507,21 +508,11 @@ def process_csv(
         add_copyright_tags=add_copyright_tags,
     )
 
-    temporary_path = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=output_path.parent,
-            prefix=f".{output_path.name}.", suffix=".tmp", delete=False,
-        ) as output:
-            temporary_path = Path(output.name)
-            output.write(", ".join(final_tags))
-        temporary_path.replace(output_path)
+        atomic_write_text(output_path, ", ".join(final_tags))
     except Exception as exc:
         print(f"ERROR writing {output_path}: {exc}")
         return False
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
 
     if report_success:
         print(f"WROTE {output_path.name} ({len(final_tags)} tags)")

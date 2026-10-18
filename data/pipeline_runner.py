@@ -4,7 +4,10 @@ import argparse
 import subprocess
 import sys
 import os
+from contextlib import ExitStack
+import caption_queue
 from image_failures import ENV_KEY, reset_failures, failures
+from runtime_config import pipeline_images
 
 from pipeline import ROOT, STAGES, stage_command, stage_skip_reason, stage_description
 
@@ -24,6 +27,23 @@ def main() -> int:
     parser.add_argument("--refiner-thinking", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--refiner-json", action=argparse.BooleanOptionalAction, default=None)
     args = parser.parse_args()
+    with ExitStack() as locks:
+        for acquire, message in (
+            (caption_queue.worker_lock, "Another caption worker or file transfer is active."),
+            (caption_queue.downloader_lock, "Wait for downloads to finish before starting CLI captioning."),
+        ):
+            handle = acquire()
+            if handle is None:
+                print(message, file=sys.stderr)
+                return 1
+            locks.enter_context(handle)
+        return run_pipeline(args)
+
+
+def run_pipeline(args):
+    """Run stages while main holds both dataset-operation locks."""
+    images = pipeline_images()
+    images.mkdir(parents=True, exist_ok=True)
     os.environ[ENV_KEY] = reset_failures()
     options = dict(overwrite_danbooru_txt=args.overwrite_danbooru_txt,
                    overwrite_caption_cache=args.overwrite_caption_cache,
@@ -32,7 +52,7 @@ def main() -> int:
                    overwrite_caption_files=args.overwrite_caption_files,
                    refiner_thinking=args.refiner_thinking, refiner_json=args.refiner_json)
     for stage in STAGES:
-        reason = stage_skip_reason(stage, ROOT / "images", **options)
+        reason = stage_skip_reason(stage, images, **options)
         if reason:
             print(f"Skipped {stage.label}: {reason}", flush=True)
             continue

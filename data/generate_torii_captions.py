@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from file_io import file_hash as image_hash, atomic_write_text
+from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS
+
 from runtime_config import pipeline_images
 from image_failures import is_skipped, skip_image
 
-import hashlib
 import importlib.util
 import sqlite3
 import sys
@@ -25,7 +27,6 @@ from caption_progress import caption_progress
 SCRIPT_DIR = Path(__file__).parent.resolve()
 IMAGES_DIR = pipeline_images()
 TORII_OUTPUT_CACHE = SCRIPT_DIR / "caches" / "toriiOutput.sqlite3"
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
 def load_prompt_builder():
@@ -47,14 +48,6 @@ def initialize_cache(cache_path=TORII_OUTPUT_CACHE):
         )
 
 
-def image_hash(image_path):
-    digest = hashlib.sha256()
-    with image_path.open("rb") as image_file:
-        for chunk in iter(lambda: image_file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def get_cached_output(image_path, cache_path=TORII_OUTPUT_CACHE):
     with closing(sqlite3.connect(cache_path)) as database:
         row = database.execute("SELECT output FROM torii_outputs WHERE image_hash = ?", (image_hash(image_path),)).fetchone()
@@ -70,8 +63,13 @@ def restore_cached_output(image_path, cache_path=TORII_OUTPUT_CACHE):
     text = get_cached_output(image_path, cache_path)
     if not text:
         return False
-    image_path.with_suffix(".toriiOutput").write_text(text + "\n", encoding="utf-8")
+    write_output(image_path, text)
     return True
+
+
+def write_output(image_path, text):
+    """Publish a whole report so an interrupted write stays retryable."""
+    atomic_write_text(image_path.with_suffix(".toriiOutput"), text + "\n", prefix=".torii-")
 
 
 def restore_or_cache_parquet_outputs(
@@ -105,7 +103,7 @@ def restore_or_cache_parquet_outputs(
     for stem, report in reports.items():
         for image in candidates[stem]:
             try:
-                image.with_suffix(".toriiOutput").write_text(report + "\n", encoding="utf-8")
+                write_output(image, report)
                 cache_output(image, report, cache_path)
                 restored += 1
             except Exception as error:
@@ -153,17 +151,22 @@ def generate(client, image_path, kind, model, prompts):
 
 
 def process_image(client, image_path, model, prompts):
+    truncated = False
     try:
-        structured, structured_truncated = generate(client, image_path, "structured", model, prompts)
-        long_text, long_truncated = generate(client, image_path, "long", model, prompts)
+        structured, truncated = generate(client, image_path, "structured", model, prompts)
+        if truncated or not structured.strip():
+            raise ValueError("Torii structured analysis was truncated or empty; no report was saved")
+        long_text, truncated = generate(client, image_path, "long", model, prompts)
+        if truncated or not long_text.strip():
+            raise ValueError("Torii long caption was truncated or empty; no report was saved")
         text = f"# Structured analysis\n\n{structured.strip()}\n\n# Long detailed caption\n\n{long_text.strip()}"
-        image_path.with_suffix(".toriiOutput").write_text(text + "\n", encoding="utf-8")
+        write_output(image_path, text)
         cache_output(image_path, text)
-        return True, structured_truncated or long_truncated
+        return True, False
     except Exception as error:
         skip_image(image_path, error)
         tqdm.write(f"Error generating Torii output for {image_path.name}: {error}")
-        return False, False
+        return False, truncated
 
 
 def main():

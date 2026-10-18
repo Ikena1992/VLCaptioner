@@ -1,3 +1,4 @@
+from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS
 from runtime_config import pipeline_images
 from source_tag_file import read_source_tags
 from pathlib import Path
@@ -15,7 +16,6 @@ IMAGES_DIR = pipeline_images()
 
 CHARACTER_DB = SCRIPT_DIR / "caches/danbooru_character_explanationsFromVLM.sqlite3"
 WIKI_CACHE_DB = SCRIPT_DIR / "caches/cache_wiki.sqlite3"
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 # -------------------------------------------------
 # Helpers

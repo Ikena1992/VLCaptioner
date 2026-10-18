@@ -1,6 +1,7 @@
+from dataset_files import CONVERSION_EXTENSIONS as image_extensions, JPEG_EXTENSIONS as jpeg_extensions
+from file_io import atomic_path
 from runtime_config import pipeline_images
 import os
-import tempfile
 from image_failures import is_skipped, skip_image
 from PIL import Image, ImageOps, UnidentifiedImageError
 from tqdm import tqdm
@@ -8,11 +9,6 @@ from tqdm import tqdm
 # Folder named 'images' one level above this script
 folder_path = pipeline_images().as_posix()
 folder_path = os.path.abspath(folder_path)
-
-# Supported image extensions
-image_extensions = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".avif", ".gif")
-jpeg_extensions = (".jpg", ".jpeg")
-
 
 def save_webp(img, output_path, source_extension, source_size):
     img.save(output_path, "WEBP", lossless=True, quality=100, method=4)
@@ -52,7 +48,6 @@ for filename in tqdm(image_files, desc="Converting images", unit="image"):
     source_size = os.path.getsize(file_path)
     new_filename = os.path.splitext(filename)[0] + ".webp"
     new_file_path = os.path.join(folder_path, new_filename)
-    temp_file_path = None
 
     try:
         if target_counts[new_filename.casefold()] > 1:
@@ -77,23 +72,17 @@ for filename in tqdm(image_files, desc="Converting images", unit="image"):
                 img = img.convert("RGB")
 
             # Save image as WebP
-            with tempfile.NamedTemporaryFile(
-                dir=folder_path, prefix=f".{new_filename}.", suffix=".tmp", delete=False
-            ) as temporary:
-                temp_file_path = temporary.name
-            save_webp(img, temp_file_path, source_extension, source_size)
+            with atomic_path(new_file_path, overwrite=False) as temporary:
+                save_webp(img, temporary, source_extension, source_size)
 
         # Publish atomically. Reopen the file at its final path before removing
         # the source: a successful save/rename alone does not prove that a
         # readable converted image remains there.
-        os.replace(temp_file_path, new_file_path)
         verify_webp(new_file_path)
         os.remove(file_path)
     except (UnidentifiedImageError, OSError, ValueError) as error:
-        # A failed save may leave an incomplete WebP. Preserve the source and
-        # remove only that incomplete output before continuing the batch.
-        if temp_file_path is not None and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+        # The shared writer removes unfinished temporary files; keep originals
+        # for retry if saving, publication, or final verification fails.
         failed_files.append((file_path, str(error)))
         skip_image(file_path, error)
         tqdm.write(f"Skipped {file_path}: {error}")

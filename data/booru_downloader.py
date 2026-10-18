@@ -1,4 +1,6 @@
 """Original-image downloading, independent of the GUI and captioning pipeline."""
+from file_io import publish_file
+from dataset_files import IMAGE_FILE_TYPES as IMAGE_EXTENSIONS
 from dataclasses import dataclass
 import hashlib
 from html import unescape
@@ -19,7 +21,6 @@ from refresh_tags_from_danbooru import post_to_tags as danbooru_post_to_tags
 from fetch_danbooru_tags import save_tags
 
 MD5 = re.compile(r"^[0-9a-f]{32}$", re.I)
-IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "avif"}
 
 
 class DatasetCountError(RuntimeError):
@@ -116,12 +117,9 @@ def publish_bundle(temporary, target, staging):
             previous = snapshot.read_bytes() if snapshot.exists() else None
             if originals[destination] != previous:
                 continue
-            prepared.replace(destination)
+            publish_file(prepared, destination)
             changed.append(destination)
-        if os.name == "nt":
-            os.rename(temporary, target)
-        else:
-            os.link(temporary, target)
+        publish_file(temporary, target, overwrite=False)
     except (OSError, ValueError):
         for destination in reversed(changed):
             original = originals[destination]
@@ -130,7 +128,7 @@ def publish_bundle(temporary, target, staging):
             else:
                 restore = staging / (destination.name + ".restore")
                 restore.write_bytes(original)
-                restore.replace(destination)
+                publish_file(restore, destination)
         raise
 
 

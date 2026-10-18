@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataset_files import IMAGE_EXTENSIONS, COMPANION_EXTENSIONS, group_dataset_files
+
 import argparse
 import re
 import shutil
@@ -12,8 +14,6 @@ from tqdm import tqdm
 
 
 ROOT = Path(__file__).resolve().parent.parent
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".avif"}
-COMPANION_EXTENSIONS = {".txt", ".short", ".long", ".tag", ".combined", ".csv", ".json"}
 MAX_SCAN_CHARS = 200_000
 WORD_RE = re.compile(r"\b[^\W_]+(?:['’-][^\W_]+)*\b", re.UNICODE)
 SENTENCE_BREAK_RE = re.compile(r"[.!?]+(?:[\"')\]]+)?\s+")
@@ -115,10 +115,7 @@ def quarantine(
     if source == destination:
         raise ValueError("Source and destination must be different folders")
 
-    files_by_stem: dict[str, list[Path]] = {}
-    for candidate in source.iterdir():
-        if candidate.is_file() and candidate.suffix.lower() in COMPANION_EXTENSIONS | IMAGE_EXTENSIONS:
-            files_by_stem.setdefault(candidate.stem.casefold(), []).append(candidate)
+    files_by_stem = group_dataset_files(source.iterdir())
 
     found = 0
     checked = 0
@@ -126,7 +123,7 @@ def quarantine(
     issue_counts: dict[str, int] = {}
     for stem, files in tqdm(sorted(files_by_stem.items()), desc="Checking captions", unit="image"):
         # Skip unrelated sidecars until an image or caption identifies an output set.
-        if not any(path.suffix.lower() in IMAGE_EXTENSIONS | {".short", ".long"} for path in files):
+        if not any(path.suffix.lower() in IMAGE_EXTENSIONS + (".short", ".long") for path in files):
             continue
         checked += 1
         try:

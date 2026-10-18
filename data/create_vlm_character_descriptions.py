@@ -1,8 +1,9 @@
+from dataset_files import IMAGE_EXTENSIONS
+from file_io import file_hash as digest
 from runtime_config import pipeline_images
 from image_failures import is_skipped
 """Generate character reference descriptions with the configured Ollama model."""
 import csv
-import hashlib
 import sqlite3
 from pathlib import Path
 
@@ -36,8 +37,6 @@ INVALID_OUTPUT_TERMS = {
     "in a room", "outdoors", "looking at the viewer", "smiling", "frowning",
     "holding", "doing", "text", "nude", "naked", "bikini", "underwear",
 }
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 def init_db():
     ensure_runtime_cache(CACHE)
@@ -91,7 +90,7 @@ def main():
     for image in sorted(IMAGES.glob("*.*")):
         if is_skipped(image):
             continue
-        if image.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".bmp"} or not image.with_suffix(".csv").exists():
+        if image.suffix.lower() not in IMAGE_EXTENSIONS or not image.with_suffix(".csv").exists():
             continue
         try:
             characters, general = read_metadata(image)

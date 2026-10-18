@@ -1,4 +1,5 @@
 """Compile pixel-coordinate image layouts into MOSS-Image prompts."""
+from file_io import atomic_write_text
 import json
 import math
 from decimal import Decimal, InvalidOperation
@@ -201,28 +202,7 @@ def compile_layout(text, width, height, *, preview_size=None):
 
 def write_sidecar(destination, text, *, overwrite=False):
     """Publish complete JSON atomically; replace existing files only on request."""
-    import os
-    import tempfile
-    from pathlib import Path
-    destination = Path(destination)
-    fd, name = tempfile.mkstemp(prefix=".layout-", suffix=".tmp", dir=destination.parent)
-    temporary = Path(name)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as output:
-            output.write(text + "\n")
-            output.flush()
-            os.fsync(output.fileno())
-        if overwrite:
-            os.replace(temporary, destination)
-            return
-        try:
-            # Windows rename refuses existing targets; POSIX rename replaces
-            # them, so use an exclusive hard link on POSIX instead.
-            if os.name == "nt":
-                os.rename(temporary, destination)
-            else:
-                os.link(temporary, destination)
-        except FileExistsError:
-            pass
-    finally:
-        temporary.unlink(missing_ok=True)
+        atomic_write_text(destination, text + "\n", overwrite=overwrite, fsync=True, prefix=".layout-")
+    except FileExistsError:
+        pass

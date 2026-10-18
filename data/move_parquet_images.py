@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from dataset_files import IMAGE_EXTENSIONS
+
 import shutil
 from pathlib import Path
 
@@ -13,16 +15,6 @@ ROOT = Path(__file__).resolve().parents[1]
 IMAGES_DIR = ROOT / "images"
 PARQUET_DIR = ROOT / "data" / "parquet"
 DESTINATION_DIR = ROOT / "ParquetImages"
-IMAGE_EXTENSIONS = {
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".webp",
-    ".bmp",
-    ".gif",
-    ".tif",
-    ".tiff",
-}
 
 
 def load_md5s(parquet_dir: Path) -> set[str]:

@@ -20,6 +20,7 @@ __pycache__/
 /test/
 /tests/
 /.test-tmp/
+/AGENTS.md
 
 # Local environment and editor artifacts
 .env

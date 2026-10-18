@@ -12,11 +12,32 @@ The `data/` directory contains application code as well as ignored runtime folde
 | GUI | `data/GUI.pyw` launches `data/gui.py`; platform launchers are `GUI.cmd` and `GUI.sh`. |
 | Pipeline | `data/pipeline.py` defines stages; `data/pipeline_runner.py` runs them from the command line. |
 | Downloads | `data/downloader_gui.py`, `data/booru_downloader.py`, and the Danbooru/Gelbooru clients. |
-| Dataset tools | `data/dataset_manager.py` and `data/copy_move_images_GUI.py`. |
+| Dataset tools | `data/dataset_manager.py`, `data/copy_move_images_GUI.py`, and the filesystem operations in `data/dataset_transfer.py`. |
 | Inference | `data/ollama_client.py`, Torii/refiner generation modules, and `data/tag_images_with_wd14.py`. |
 | Outputs | `data/check_caption_quality.py`, `data/finalize_caption_dataset.py`, and `data/refiner_json.py`. |
 | Queue and progress | `data/caption_queue.py` and `data/caption_progress.py`. |
 | Configuration | `data/runtime_config.py` reads local `config.txt`; `config.example.txt` documents defaults. |
+| Shared file policies | `data/dataset_files.py` defines image formats, companion suffixes, grouping, conversion inputs, and training-text exports. |
+| Shared file I/O | `data/file_io.py` provides streaming hashes and atomic writes/publication. |
+
+Import format and companion policies from `dataset_files` instead of maintaining
+another extension list. Compound `.review.json` files belong to their image's
+bundle; an exact image basename takes precedence when it ends in `.review`.
+Finalization removes intermediates, while copy/move and review tools retain
+them with the image. Source-tag scans exclude generated caption variants such
+as `.long.txt`.
+
+Use `file_io.file_hash` for content-based file identities; its default SHA-256
+format preserves existing cache keys. Download verification still computes the
+site's MD5 while streaming, and structured request-cache keys keep their existing
+input format. Use `atomic_write_text`, `atomic_write_json`, or `atomic_output`
+for complete file writes; `atomic_path` supports encoders such as Pillow and
+ZIP writers. All stage beside the destination and publish after successful
+completion. Pass `overwrite=False` for create-only files and `fsync=True` when
+disk synchronization is required. `publish_file` handles already-staged files.
+Multi-file operations still need their bundle journals and recovery logic.
+The shared Danbooru client owns rate limiting and HTTP 429 retries. Callers pass
+their request interval and retry budget instead of adding another retry loop.
 
 ## Local files
 

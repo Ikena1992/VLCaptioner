@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from file_io import atomic_path
 
 
 def seed_path(runtime_path: str | Path) -> Path:
@@ -23,5 +24,9 @@ def ensure_runtime_cache(runtime_path: str | Path) -> Path:
                 b"version https://git-lfs.github.com/spec/v1"
             )
         if not is_lfs_pointer:
-            shutil.copyfile(bundled_seed, runtime_path)
+            try:
+                with atomic_path(runtime_path, overwrite=False) as temporary:
+                    shutil.copyfile(bundled_seed, temporary)
+            except FileExistsError:
+                pass  # Another process initialized the writable cache first.
     return runtime_path

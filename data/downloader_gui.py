@@ -2,7 +2,7 @@
 import queue
 import json
 from pathlib import Path
-import tempfile
+from file_io import atomic_write_json
 import threading
 import uuid
 import tkinter as tk
@@ -221,22 +221,12 @@ class DownloaderGUI:
 
     def save_settings(self):
         settings = {"auto_caption": self.auto_caption.get(), "batch_size": self.batch_size.get(), "blacklist_separator": "spaces", "blacklist": self.blacklist.get(), "rows": list(self.rows.values())}
-        temporary = None
         try:
             self.settings_file.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.settings_file.parent,
-                                             prefix=".downloader-settings-", suffix=".tmp", delete=False) as handle:
-                temporary = Path(handle.name)
-                handle.write(json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
-            temporary.replace(self.settings_file)
+            atomic_write_json(self.settings_file, settings, ensure_ascii=False, indent=2,
+                              trailing_newline=True, prefix=".downloader-settings-")
         except OSError:
             messagebox.showwarning("Image downloader", "Could not save downloader settings. Check folder permissions.", parent=self.root)
-        finally:
-            if temporary is not None:
-                try:
-                    temporary.unlink(missing_ok=True)
-                except OSError:
-                    pass  # Cleanup failure must not prevent the window closing.
 
     def update_row_count(self):
         self.row_count.set(f"{len(self.rows):,} searches")

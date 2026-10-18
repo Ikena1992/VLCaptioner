@@ -1,6 +1,8 @@
 """Browse generated layout JSON sidecars and preview their boxes on images."""
 from __future__ import annotations
 
+from dataset_files import IMAGE_EXTENSIONS
+
 import json
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -13,7 +15,7 @@ from refiner_json import box_to_pixels
 
 
 IMAGE_TYPES = (
-    ("Images", "*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff"),
+    ("Images", ' '.join('*' + extension for extension in IMAGE_EXTENSIONS)),
     ("All files", "*.*"),
 )
 JSON_TYPES = (("JSON files", "*.json"), ("All files", "*.*"))
@@ -134,7 +136,7 @@ class LayoutViewer:
         self.fill_details()
         sibling = Path(path)
         candidate = next((sibling.with_suffix(suffix) for suffix in
-                          (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
+                          IMAGE_EXTENSIONS
                           if sibling.with_suffix(suffix).is_file()), None)
         if candidate is not None:
             # Keep the explicitly selected JSON, including its dotted basename.
