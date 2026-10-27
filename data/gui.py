@@ -31,7 +31,7 @@ import caption_queue
 SETTINGS_FILE = ROOT / "data" / "caches" / "captioner_settings.json"
 OPTION_NAMES = ("add_wd14_tags", "overwrite_danbooru_txt", "overwrite_caption_cache",
                 "overwrite_caption_files", "add_year_tag", "add_copyright_tags",
-                "refiner_thinking", "refiner_json")
+                "refiner_thinking", "refiner_json", "lighting_tags")
 
 
 def read_captioner_settings(path):
@@ -148,7 +148,7 @@ class PipelineGUI:
         ttk.Label(self.tag_options, text="Tag files and metadata", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 12))
         steps_page = self.steps_page = ttk.Frame(self.notebook, padding=12)
         self.notebook.add(steps_page, text="Steps")
-        self.steps = ttk.Treeview(steps_page, columns=("status", "detail"), height=9)
+        self.steps = ttk.Treeview(steps_page, columns=("status", "detail"), height=len(STAGES))
         self.steps.heading("#0", text="Step")
         self.steps.heading("status", text="Status")
         self.steps.heading("detail", text="Behavior for selected options")
@@ -209,6 +209,13 @@ class PipelineGUI:
         self.copy_move_button = ttk.Button(folders, text="Copy / move by tags", bootstyle="secondary-outline", command=self.open_copy_move_gui)
         self.copy_move_button.pack(side="left", padx=8)
         self.add_wd14_tags = tk.BooleanVar(value=False)
+        self.lighting_tags = tk.BooleanVar(value=False)
+        self.add_advanced_option(
+            "Add lighting tags (Booru Lighting Tagger)", self.lighting_tags,
+            "Append lighting and tonal-key tags before captioning. Keeps existing tags. "
+            "Downloads the lighting models on first use; adds processing time.",
+            parent=self.tag_options,
+        )
         self.add_advanced_option(
             "Add missing tags to existing tag files", self.add_wd14_tags,
             "Append missing tags with at least 0.91 confidence. Images without tags are always tagged.",
@@ -371,7 +378,8 @@ class PipelineGUI:
                     add_year_tag=self.add_year_tag.get(),
                     add_copyright_tags=self.add_copyright_tags.get(),
                     overwrite_caption_files=self.overwrite_caption_files.get(),
-                    refiner_thinking=self.refiner_thinking.get(), refiner_json=self.refiner_json.get())
+                    refiner_thinking=self.refiner_thinking.get(), refiner_json=self.refiner_json.get(),
+                    lighting_tags=self.lighting_tags.get())
 
     def restore_settings(self):
         try:
@@ -681,6 +689,7 @@ class PipelineGUI:
                 self.run_options["add_copyright_tags"],
                 self.run_options["overwrite_caption_files"],
                 self.run_options["refiner_thinking"], self.run_options["refiner_json"],
+                self.run_options["lighting_tags"],
             ),
             daemon=True,
         ).start()
@@ -696,6 +705,7 @@ class PipelineGUI:
         overwrite_caption_files=False,
         refiner_thinking=None,
         refiner_json=None,
+        lighting_tags=False,
     ):
         code = 0
         shared_failure = False
@@ -705,7 +715,8 @@ class PipelineGUI:
                            skip_wd14_high_confidence=skip_wd14_high_confidence,
                            add_year_tag=add_year_tag, add_copyright_tags=add_copyright_tags,
                            overwrite_caption_files=overwrite_caption_files,
-                           refiner_thinking=refiner_thinking, refiner_json=refiner_json)
+                           refiner_thinking=refiner_thinking, refiner_json=refiner_json,
+                           lighting_tags=lighting_tags)
         try:
             for index, stage in enumerate(stages, 1):
                 if self.cancel_requested.is_set():

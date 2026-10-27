@@ -26,6 +26,7 @@ def main() -> int:
     parser.add_argument("--add-copyright-tags", action="store_true")
     parser.add_argument("--refiner-thinking", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--refiner-json", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--lighting-tags", action="store_true", help="Append Booru Lighting Tagger tags.")
     args = parser.parse_args()
     with ExitStack() as locks:
         for acquire, message in (
@@ -50,7 +51,8 @@ def run_pipeline(args):
                    skip_wd14_high_confidence=args.skip_wd14,
                    add_year_tag=args.add_year_tag, add_copyright_tags=args.add_copyright_tags,
                    overwrite_caption_files=args.overwrite_caption_files,
-                   refiner_thinking=args.refiner_thinking, refiner_json=args.refiner_json)
+                   refiner_thinking=args.refiner_thinking, refiner_json=args.refiner_json,
+                   lighting_tags=args.lighting_tags)
     for stage in STAGES:
         reason = stage_skip_reason(stage, images, **options)
         if reason:

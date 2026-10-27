@@ -9,6 +9,7 @@ from tqdm import tqdm
 from danbooru_client import danbooru_get
 from danbooru_cache import TagCategoryCache
 from source_tag_file import read_source_tags, read_source_metadata
+from lighting_tags import LIGHTING_TAGS
 
 # Paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -111,6 +112,11 @@ def get_tag_category(tag):
         category = tag_cache[tag]
         tag_cache[cache_key] = category
         return category
+
+    # Some lighting labels use e621 vocabulary and have no Danbooru entry.
+    # Use the local category only when no confirmed category is available.
+    if cache_key in LIGHTING_TAGS:
+        return 0
 
     # Older versions cached failed requests as None. Remove those entries so
     # this run can retry the API instead of treating them as known categories.

@@ -67,8 +67,9 @@ def merge_batch_options(saved, selected):
     if not isinstance(saved, dict):
         raise ValueError("Invalid saved caption options for this batch.")
     merged = dict(saved)
-    for key in ("refiner_thinking", "refiner_json"):
-        merged.setdefault(key, selected[key])
+    for key in ("refiner_thinking", "refiner_json", "lighting_tags"):
+        if key in selected:
+            merged.setdefault(key, selected[key])
     if any(not isinstance(merged.get(key), bool) for key in selected):
         raise ValueError("Invalid saved caption options for this batch.")
     return {key: merged[key] for key in selected}

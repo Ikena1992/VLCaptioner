@@ -71,6 +71,7 @@ file just because the window closes.
 | Option | On | Off (default) |
 | --- | --- | --- |
 | **Add missing tags to existing tag files** | Appends missing high-confidence tags. | Leaves existing tag files unchanged. Images without tags are tagged either way. |
+| **Add lighting tags (Booru Lighting Tagger)** | Appends lighting and tonal-key tags before captioning, preserving existing tags and metadata. | Skips the lighting model. |
 | **Replace existing tags with fresh Danbooru or Gelbooru tags** | Replaces matching source tags with tags from the first matching post. | Keeps existing tag files and skips their lookup. |
 | **Bypass refinement caption cache** | Bypasses long, short and JSON caches. With JSON creation enabled, regenerates existing JSON files too. Torii reports and Parquet inputs are reused. | Reuses cached captions when available and keeps existing JSON files. Existing long/short files follow the option below. |
 | **Overwrite existing .long and .short files** | Replaces both caption files even when they already exist; cache use follows the setting above. | Keeps existing `.long` files and skips images that have both caption files. |
@@ -101,6 +102,36 @@ captioning, and finalization failures are logged; remaining images continue.
 Skipped images stay in `images/`, and a new run retries them. The GUI reports
 the skipped count on completion. Missing required models, invalid setup, or
 other run-wide failures still stop the pipeline.
+
+### Optional lighting tags
+
+Enable **Tag options → Add lighting tags (Booru Lighting Tagger)** to supplement
+the regular tags with lighting details such as `backlighting`, `rim light`,
+and `warm lighting`, plus a tonal key when detected. This option is independent
+of **Add missing tags to existing tag files** and also processes images that
+already have source tags. It defaults to off and is saved with the other GUI
+options and queued batch settings.
+
+The [Booru Lighting Tagger](https://huggingface.co/MarioTheKnight/booru-lighting-tagger)
+runs locally with its v1.0.2 three-seed ensemble and default per-label thresholds.
+The first use downloads about 2.4 GB of lighting weights plus the base model
+(about 1.2 GB); later runs reuse the cache. It uses CUDA when available and CPU
+otherwise, and adds processing time. Its scores are ratings from 0 to 10, so
+the regular tagger's 0.91 confidence threshold does not apply.
+
+The lighting stage appends missing tags to source TXT files and updates the
+general tags in existing CSV metadata without replacing other fields. Known
+lighting labels are categorized locally, including labels absent from Danbooru.
+Lighting tags then participate in tag generation and caption prompts. Existing
+completed captions and Torii reports still follow their usual reuse rules.
+To regenerate existing long/short captions, enable caption overwrite and cache
+bypass as described below.
+
+For command-line runs, use:
+
+```sh
+python data/pipeline_runner.py --lighting-tags
+```
 
 ### Stopping and resuming
 

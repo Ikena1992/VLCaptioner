@@ -13,6 +13,7 @@ from requests.adapters import HTTPAdapter, Retry
 from tqdm import tqdm
 from danbooru_client import configure_danbooru_session
 from danbooru_cache import TagCategoryCache, normalize_cache_key
+from lighting_tags import LIGHTING_TAGS
 from cache_seed import ensure_runtime_cache
 
 # -------------------------------
@@ -248,7 +249,7 @@ def main():
     tags = [
         tag
         for tag in all_tags
-        if cache_tags.get(tag, 4) == 4
+        if cache_tags.get(tag, 0 if tag.lower().replace(" ", "_") in LIGHTING_TAGS else 4) == 4
         and not wiki_cache_contains(tag)
     ]
 

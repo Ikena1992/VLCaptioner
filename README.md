@@ -163,6 +163,7 @@ set in `config.txt` for the command line and first GUI launch.
 | Options | **Bypass refinement caption cache** | Request fresh captions and, when JSON creation is enabled, regenerate JSON. |
 | Options | **Overwrite existing .long and .short files** | Replace caption files already present in the input set. |
 | Tag options | **Add missing tags to existing tag files** | Append missing high-confidence local tags. |
+| Tag options | **Add lighting tags (Booru Lighting Tagger)** | Append lighting and tonal-key tags before captioning; downloads models on first use. |
 | Tag options | **Replace existing tags with fresh Danbooru or Gelbooru tags** | Refresh source tags from the first matching post. |
 | Tag options | **Add upload year to .tag files** | Include `year YYYY` when an upload date is available. |
 | Tag options | **Include copyright and series tags in .tag files** | Retain these tags in `.tag` and `.combined`. |

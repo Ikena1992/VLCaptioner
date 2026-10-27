@@ -24,6 +24,7 @@ STAGES = (
     Stage("convert_images_to_webp.py", "Convert images to WebP"),
     Stage("fetch_danbooru_tags.py", "Fetch Danbooru / Gelbooru tags"),
     Stage("tag_images_with_wd14.py", "Generate image tags", "wd14"),
+    Stage("tag_images_with_lighting.py", "Add lighting tags", "lighting_tags"),
     Stage("fetch_character_explanations.py", "Fetch character explanations"),
     Stage("create_metadata_csvs.py", "Create metadata CSV files"),
     Stage("create_vlm_character_descriptions.py", "Create character descriptions"),
@@ -35,7 +36,10 @@ STAGES = (
 
 def stage_description(stage, overwrite_danbooru_txt=False, skip_wd14_high_confidence=False,
                       overwrite_caption_cache=False, overwrite_caption_files=False,
-                      add_year_tag=False, add_copyright_tags=False, refiner_thinking=None, refiner_json=None):
+                      add_year_tag=False, add_copyright_tags=False, refiner_thinking=None, refiner_json=None,
+                      lighting_tags=False):
+    if stage.script == "tag_images_with_lighting.py":
+        return "Append missing lighting tags; preserve existing tags" if lighting_tags else "Lighting tagging is turned off"
     if stage.script == "fetch_danbooru_tags.py":
         return "Replace existing source tags from matching posts" if overwrite_danbooru_txt else "Fetch source tags only for images without tags"
     if stage.script == "tag_images_with_wd14.py":
@@ -64,6 +68,8 @@ def stage_description(stage, overwrite_danbooru_txt=False, skip_wd14_high_confid
 
 def stage_skip_reason(stage, image_folder, overwrite_danbooru_txt=False,
                       skip_wd14_high_confidence=False, **options):
+    if stage.script == "tag_images_with_lighting.py" and not options.get("lighting_tags", False):
+        return "Lighting tagging is turned off"
     def has_tags(path):
         try:
             return has_source_tags(path)
