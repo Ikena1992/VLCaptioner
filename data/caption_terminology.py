@@ -429,6 +429,13 @@ def build_terminology_section(raw_tags: list[str]) -> str:
 
     fact_rules = []
 
+    if {"vaginal", "double penetration"} <= normalized_tags and "anal" not in normalized_tags:
+        fact_rules.append(
+            "For this tag combination, no anal activity is taking place. "
+            "Do not infer anal activity from the double penetration tag or "
+            "describe it in the caption."
+        )
+
     if {"sex", "vaginal"} <= normalized_tags:
         fact_rules.append(
             "Write vaginal sex as a definite visible fact. If a penis is "
