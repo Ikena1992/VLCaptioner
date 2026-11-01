@@ -89,6 +89,10 @@ tags. Each asset set is checked before publication: passing sets go straight to
 `done/`, and flagged sets go straight to `captionReview/`. Existing caches are
 reused when available.
 
+If Torii loops on repeated empty thinking blocks, the affected request is retried
+once with a repetition penalty. Persistent loops are rejected without saving or
+caching the report, leaving the image available for a later run.
+
 The **Steps** tab shows how the selected options affect each step. During a
 run it reports Pending, Running, Done, Skipped, Failed, or Stopped. Work is
 checked immediately before each step, so tags fetched earlier in the run can

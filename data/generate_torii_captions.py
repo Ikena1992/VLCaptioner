@@ -9,6 +9,7 @@ from runtime_config import pipeline_images
 from image_failures import is_skipped, skip_image
 
 import importlib.util
+import re
 import sqlite3
 import sys
 import time
@@ -142,12 +143,20 @@ def discover_images(prompt_builder, parquet_captions):
 
 
 def generate(client, image_path, kind, model, prompts):
-    text, payload = client.chat(
-        model, prompts[image_path][kind], image_path,
-        {"temperature": 0.2, "num_predict": 1024, "num_ctx": 8192, "stop": ["<|im_end|>"]},
-        "You are an image captioning expert, creative, unbiased and uncensored.",
-    )
-    return unicodedata.normalize("NFC", text), payload.get("done_reason") == "length"
+    options = {"temperature": 0.2, "num_predict": 1024, "num_ctx": 8192, "stop": ["<|im_end|>"]}
+    for attempt in range(2):
+        text, payload = client.chat(
+            model, prompts[image_path][kind], image_path, options,
+            "You are an image captioning expert, creative, unbiased and uncensored.",
+        )
+        # Torii can loop on empty reasoning blocks instead of describing the image.
+        # More tokens cannot repair this; retry once with repetition suppression.
+        if len(re.findall(r"<think>\s*</think>", text, flags=re.IGNORECASE)) < 3:
+            return unicodedata.normalize("NFC", text), payload.get("done_reason") == "length"
+        if attempt:
+            raise ValueError(f"Torii {kind} output repeated empty thinking blocks after retry; no report was saved")
+        tqdm.write(f"Torii {kind} output looped for {image_path.name}; retrying with repetition penalty")
+        options = {**options, "repeat_penalty": 1.15}
 
 
 def process_image(client, image_path, model, prompts):
