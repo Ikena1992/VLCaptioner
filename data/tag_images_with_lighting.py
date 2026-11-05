@@ -12,7 +12,7 @@ from tqdm import tqdm
 from dataset_files import IMAGE_EXTENSIONS
 from file_io import atomic_output
 from image_failures import is_skipped, skip_image
-from lighting_tags import LIGHTING_TAGS, MODEL_REPO, MODEL_REVISION
+from lighting_tags import LIGHTING_TAGS, MODEL_REPO, MODEL_REVISION, MODEL_VERSION
 from runtime_config import pipeline_images
 from tag_images_with_wd14 import (
     append_missing_tags, clean_tag, normalize_tag_for_compare, split_tags,
@@ -147,7 +147,7 @@ def main():
     if not images:
         print("No images need lighting tags.")
         return 0
-    print(f"Loading {MODEL_REPO} v1.0.2 (three seeds, default thresholds)...", flush=True)
+    print(f"Loading {MODEL_REPO} v{MODEL_VERSION} (three seeds, default thresholds)...", flush=True)
     try:
         tagger = load_lighting_tagger()
     except Exception as error:

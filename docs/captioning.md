@@ -117,11 +117,17 @@ already have source tags. It defaults to off and is saved with the other GUI
 options and queued batch settings.
 
 The [Booru Lighting Tagger](https://huggingface.co/MarioTheKnight/booru-lighting-tagger)
-runs locally with its v1.0.2 three-seed ensemble and default per-label thresholds.
+runs locally with its v2.0.0 three-seed ensemble and default per-label thresholds.
 The first use downloads about 2.4 GB of lighting weights plus the base model
 (about 1.2 GB); later runs reuse the cache. It uses CUDA when available and CPU
 otherwise, and adds processing time. Its scores are ratings from 0 to 10, so
 the regular tagger's 0.91 confidence threshold does not apply.
+
+V2 adds 14 lighting labels and revises several label definitions. Upgrading
+downloads a separate pinned model snapshot. Existing tags are preserved; to keep
+a dataset consistent with v2, restore source tags without v1 lighting additions
+before running the lighting stage again. Previously generated captions and Torii
+reports also need regeneration to reflect the new tags.
 
 The lighting stage appends missing tags to source TXT files and updates the
 general tags in existing CSV metadata without replacing other fields. Known
