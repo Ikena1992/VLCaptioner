@@ -42,7 +42,7 @@ their request interval and retry budget instead of adding another retry loop.
 ## Local files
 
 Images enter through `images/`; completed sets go to `done/` and flagged sets to
-`captionReview/`. Numbered `images` and `done` folders are local datasets too.
+`captionReview/`. Numbered `images`, `done`, and `captionReview` folders are local datasets too.
 `data/env/`, `data/models/`, and writable `data/caches/` contents are local runtime
 assets. The explicitly allowed SQLite seed files are versioned to initialize caches.
 

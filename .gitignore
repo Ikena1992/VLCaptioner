@@ -3,6 +3,7 @@
 /done/
 /done[0-9]*/
 /captionReview/
+/captionReview[0-9]*/
 data/env/*
 data/env_joy/*
 data/models/*

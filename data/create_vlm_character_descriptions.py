@@ -5,6 +5,7 @@ from image_failures import is_skipped
 """Generate character reference descriptions with the configured Ollama model."""
 import csv
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from ollama_client import OllamaClient, OllamaUnavailableError
@@ -40,7 +41,7 @@ INVALID_OUTPUT_TERMS = {
 
 def init_db():
     ensure_runtime_cache(CACHE)
-    with sqlite3.connect(CACHE) as db:
+    with closing(sqlite3.connect(CACHE)) as db, db:
         db.execute(
             "CREATE TABLE IF NOT EXISTS character_explanations ("
             "tag TEXT PRIMARY KEY, standard TEXT NOT NULL, "
@@ -76,7 +77,7 @@ def main():
     timeout, _ = load_positive_int("OLLAMA_TIMEOUT_SECONDS", "300")
     client = OllamaClient(url, timeout)
     init_db()
-    with sqlite3.connect(CACHE) as db:
+    with closing(sqlite3.connect(CACHE)) as db:
         existing = {row[0] for row in db.execute("SELECT tag FROM character_explanations")}
         attempted = {
             (row[0], row[1])
@@ -136,7 +137,7 @@ def main():
                 tqdm.write(f"Skipping character reference {image.name}: {error}; trying another candidate")
                 continue
             description = normalize_description(raw_description)
-            with sqlite3.connect(CACHE) as db:
+            with closing(sqlite3.connect(CACHE)) as db, db:
                 db.execute(
                     "INSERT OR IGNORE INTO character_description_attempts "
                     "(tag, image_hash, model) VALUES (?, ?, ?)",

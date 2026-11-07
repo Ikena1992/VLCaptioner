@@ -2,6 +2,7 @@ from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS
 from runtime_config import pipeline_images
 from source_tag_file import read_source_tags
 from pathlib import Path
+from contextlib import closing
 import csv
 import sqlite3
 import re
@@ -29,7 +30,7 @@ def _load_sqlite_explanations(
     if not database_path.exists():
         return {}
 
-    with sqlite3.connect(database_path) as database:
+    with closing(sqlite3.connect(database_path)) as database:
         rows = database.execute(
             f"SELECT tag, {explanation_column} FROM {table}"
         )

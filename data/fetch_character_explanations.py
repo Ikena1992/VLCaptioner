@@ -4,6 +4,7 @@ import os
 import re
 import logging
 import sqlite3
+from contextlib import closing
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -90,7 +91,7 @@ cache_tags = TagCategoryCache(CACHE_TAG_DB)
 
 def initialize_wiki_cache():
     ensure_runtime_cache(CACHE_WIKI_DB)
-    with sqlite3.connect(CACHE_WIKI_DB) as database:
+    with closing(sqlite3.connect(CACHE_WIKI_DB)) as database, database:
         database.execute("PRAGMA journal_mode=WAL")
         database.execute(
             "CREATE TABLE IF NOT EXISTS wiki_cache ("
@@ -100,7 +101,7 @@ def initialize_wiki_cache():
 
 def get_cached_wiki(tag):
     tag = normalize_cache_key(tag)
-    with sqlite3.connect(CACHE_WIKI_DB) as database:
+    with closing(sqlite3.connect(CACHE_WIKI_DB)) as database:
         row = database.execute(
             "SELECT body FROM wiki_cache WHERE tag = ?", (tag,)
         ).fetchone()
@@ -109,7 +110,7 @@ def get_cached_wiki(tag):
 
 def cache_wiki_result(tag, body):
     tag = normalize_cache_key(tag)
-    with sqlite3.connect(CACHE_WIKI_DB) as database:
+    with closing(sqlite3.connect(CACHE_WIKI_DB)) as database, database:
         database.execute(
             "INSERT OR REPLACE INTO wiki_cache(tag, body) VALUES (?, ?)",
             (tag, body),
@@ -118,7 +119,7 @@ def cache_wiki_result(tag, body):
 
 def wiki_cache_contains(tag):
     tag = normalize_cache_key(tag)
-    with sqlite3.connect(CACHE_WIKI_DB) as database:
+    with closing(sqlite3.connect(CACHE_WIKI_DB)) as database:
         return database.execute(
             "SELECT 1 FROM wiki_cache WHERE tag = ?", (tag,)
         ).fetchone() is not None

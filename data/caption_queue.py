@@ -1,5 +1,6 @@
 """Durable requests shared by the downloader and captioning windows."""
 from dataset_files import IMAGE_EXTENSIONS
+from file_io import publish_file
 import json
 import os
 import sqlite3
@@ -202,10 +203,8 @@ def cleanup_batch(identifier, status="Cancelled"):
                     else:
                         # Both paths are on the same filesystem. Publish a whole
                         # file atomically, without overwriting a racing target.
-                        if os.name == "nt":
-                            os.rename(entry, target)
-                            continue
-                        os.link(entry, target)
+                        publish_file(entry, target, overwrite=False)
+                        continue
                     entry.unlink()
                 folder.rmdir()
             db.execute("DELETE FROM jobs WHERE id=? AND status=?", (identifier, status))

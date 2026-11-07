@@ -9,7 +9,7 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_DIRS = {"tests", "test", ".test-tmp", "captionReview", ".venv"}
-LOCAL_DATA = re.compile(r"(?:images|done)[0-9]*$")
+LOCAL_DATA = re.compile(r"(?:images|done|captionReview)[0-9]*$")
 SEEDS = {
     "data/caches/cache_tags.seed.sqlite3",
     "data/caches/cache_wiki.seed.sqlite3",

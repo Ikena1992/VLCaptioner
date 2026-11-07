@@ -15,6 +15,36 @@ class OllamaUnavailableError(RuntimeError):
     """A shared server failure that should stop the current pipeline."""
 
 
+def _response_object(payload, context: str) -> dict:
+    """Validate decoded API objects before callers inspect their fields."""
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Ollama returned an invalid response object {context}")
+    if payload.get("error"):
+        raise RuntimeError(f"Ollama returned an error {context}: {payload['error']}")
+    return payload
+
+
+def _response_json(response, context: str) -> dict:
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise RuntimeError(f"Ollama returned invalid JSON {context}") from error
+    return _response_object(payload, context)
+
+
+def _model_names(response, context: str) -> list[str]:
+    models = _response_json(response, context).get("models")
+    if not isinstance(models, list):
+        raise RuntimeError(f"Ollama returned an invalid model list {context}")
+    names = []
+    for item in models:
+        name = (item.get("name") or item.get("model")) if isinstance(item, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            raise RuntimeError(f"Ollama returned an invalid model name {context}")
+        names.append(name)
+    return names
+
+
 class OllamaClient:
     def __init__(self, url: str, timeout: int):
         self.url = url.rstrip("/")
@@ -60,7 +90,9 @@ class OllamaClient:
             response.raise_for_status()
         except requests.HTTPError as error:
             try:
-                detail = response.json().get("error", response.text)
+                payload = response.json()
+                detail = payload.get("error") if isinstance(payload, dict) else None
+                detail = detail or response.text
             except ValueError:
                 detail = response.text
             detail = str(detail).strip() or "no error details returned"
@@ -69,17 +101,19 @@ class OllamaClient:
             ) from error
 
     def running_model(self) -> str:
-        response = requests.get(
-            f"{self.url}/api/ps", timeout=min(self.timeout, 3)
-        )
-        self._raise_for_status(response)
-        models = response.json().get("models", [])
+        try:
+            response = requests.get(
+                f"{self.url}/api/ps", timeout=min(self.timeout, 3)
+            )
+            self._raise_for_status(response)
+            models = _model_names(response, "while finding the loaded model")
+        except (requests.RequestException, RuntimeError) as error:
+            raise OllamaUnavailableError(
+                f"Could not query Ollama at {self.url}: {error}"
+            ) from error
         if not models:
             raise RuntimeError("Ollama has no model currently loaded")
-        model = models[0].get("name") or models[0].get("model")
-        if not model:
-            raise RuntimeError("Ollama did not return a name for the loaded model")
-        return model
+        return models[0]
 
     def ensure_model(self, model: str, status=print) -> None:
         if model in self._verified_models:
@@ -89,16 +123,12 @@ class OllamaClient:
                 f"{self.url}/api/tags", timeout=min(self.timeout, 10)
             )
             self._raise_for_status(response)
+            installed = {name.casefold() for name in _model_names(response, "while listing models")}
         except (requests.RequestException, RuntimeError) as error:
             raise OllamaUnavailableError(
                 f"Could not reach Ollama at {self.url}: {error}"
             ) from error
 
-        installed = {
-            name.casefold()
-            for item in response.json().get("models", [])
-            if (name := item.get("name") or item.get("model"))
-        }
         if model.casefold() not in installed:
             status(f"Ollama model is not installed; pulling {model}...")
             try:
@@ -115,15 +145,11 @@ class OllamaClient:
                         if not raw_line:
                             continue
                         try:
-                            update = json.loads(raw_line)
+                            update = _response_object(json.loads(raw_line), f"while pulling {model}")
                         except (TypeError, ValueError) as error:
                             raise OllamaUnavailableError(
                                 f"Ollama returned invalid JSON while pulling {model}"
                             ) from error
-                        if update.get("error"):
-                            raise OllamaUnavailableError(
-                                f"Ollama could not pull {model}: {update['error']}"
-                            )
                         current = update.get("status")
                         if current == "success":
                             completed = True
@@ -181,11 +207,7 @@ class OllamaClient:
             raise OllamaUnavailableError(f"Ollama is unavailable: {error}") from error
         except requests.RequestException as error:
             raise RuntimeError(f"Ollama request failed: {error}") from error
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise RuntimeError("Ollama returned an invalid response object")
-        if payload.get("error"):
-            raise RuntimeError(f"Ollama returned an error: {payload['error']}")
+        payload = _response_json(response, "while generating a response")
         message = payload.get("message", {})
         if not isinstance(message, dict) or not isinstance(message.get("content", ""), str):
             raise RuntimeError("Ollama returned invalid message content")
