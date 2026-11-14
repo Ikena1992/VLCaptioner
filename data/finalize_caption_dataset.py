@@ -251,6 +251,12 @@ def process_caption_pair(short_path: Path, report_success: bool = True) -> bool:
             sources.append(long_path)
         if txt_path.exists():
             sources.append(txt_path)
+        # Recaptioning copies the previous training text back into images/.
+        # Include it in the transaction so cleanup removes it only after the
+        # regenerated .combined file has been published successfully.
+        combined_path = IMAGES_DIR / f"{stem}.combined"
+        if combined_path.exists():
+            sources.append(combined_path)
         generated = {
             short_path.name: short_text,
             f"{stem}.combined": f"{tag_text}. {short_text}",

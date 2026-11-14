@@ -10,6 +10,7 @@ Files are updated in place. The default extension is .tag.
 
 import argparse
 from pathlib import Path
+from file_io import atomic_path
 
 
 QUALITY_TAGS = {
@@ -25,7 +26,7 @@ def set_masterpiece(text):
         tag for tag in tags
         if " ".join(tag.casefold().replace("_", " ").split()) not in QUALITY_TAGS
     ]
-    newline = "\r\n" if text.endswith("\r\n") else "\n" if text.endswith("\n") else ""
+    newline = "\r\n" if text.endswith("\r\n") else "\n" if text.endswith("\n") else "\r" if text.endswith("\r") else ""
     return ", ".join(["masterpiece", *remaining]) + newline
 
 
@@ -45,12 +46,17 @@ def main():
             continue
         scanned += 1
         try:
+            if path.is_symlink():
+                raise OSError('Refusing to modify a symbolic link')
             original = path.read_bytes()
             # Preserve an existing UTF-8 BOM and the trailing newline style.
             encoding = "utf-8-sig" if original.startswith(b"\xef\xbb\xbf") else "utf-8"
             updated = set_masterpiece(original.decode(encoding)).encode(encoding)
             if updated != original:
-                path.write_bytes(updated)
+                with atomic_path(path) as temporary:
+                    temporary.write_bytes(updated)
+                    if path.read_bytes() != original:
+                        raise OSError('Caption changed while processing; keeping current file')
                 changed += 1
         except (OSError, UnicodeError) as exc:
             print(f"Error: {path}: {exc}")
