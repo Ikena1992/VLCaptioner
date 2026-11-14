@@ -1,4 +1,5 @@
-from dataset_files import CONVERSION_EXTENSIONS as image_extensions, JPEG_EXTENSIONS as jpeg_extensions
+from dataset_files import CONVERSION_EXTENSIONS as image_extensions
+from webp_conversion import save_webp
 from file_io import atomic_path
 from runtime_config import pipeline_images
 import os
@@ -9,17 +10,6 @@ from tqdm import tqdm
 # Folder named 'images' one level above this script
 folder_path = pipeline_images().as_posix()
 folder_path = os.path.abspath(folder_path)
-
-def save_webp(img, output_path, source_extension, source_size):
-    img.save(output_path, "WEBP", lossless=True, quality=100, method=4)
-    if source_extension not in jpeg_extensions or os.path.getsize(output_path) <= source_size:
-        return
-
-    for quality in range(95, -1, -5):
-        img.save(output_path, "WEBP", lossless=False, quality=quality, method=4)
-        if os.path.getsize(output_path) < source_size:
-            return
-
 
 def verify_webp(output_path):
     """Raise if the published output is missing, truncated, or not WebP."""
