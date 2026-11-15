@@ -22,6 +22,7 @@ from fetch_danbooru_tags import save_tags
 
 MD5 = re.compile(r"^[0-9a-f]{32}$", re.I)
 SCORE_FILTER = re.compile(r'score:(?:>=|<=|>|<|=)?-?\d+', re.I)
+ALWAYS_BLACKLISTED = frozenset({'animated'})
 RATINGS = {'g': 'g', 'general': 'g', 's': 's', 'sensitive': 's', 'safe': 's',
            'q': 'q', 'questionable': 'q', 'e': 'e', 'explicit': 'e'}
 
@@ -89,7 +90,7 @@ def is_blacklisted(post, blacklist):
 
 def blacklist_matches(post, blacklist):
     tags = post.get("tag_string", post.get("tags", ""))
-    return sorted(blacklist.intersection(unescape(str(tags)).casefold().split()))
+    return sorted((ALWAYS_BLACKLISTED | frozenset(blacklist)).intersection(unescape(str(tags)).casefold().split()))
 
 
 def failure_reason(error):
@@ -183,6 +184,9 @@ def fetch_posts(job, page):
 def save_original(post, source, images, done, known, cancel, log=lambda message: None):
     if cancel.is_set():
         return "cancelled"
+    if is_blacklisted(post, frozenset()):
+        log('Skipped: animated posts are always blacklisted.')
+        return 'blacklisted'
     md5 = str(post.get("md5", "")).lower()
     if not MD5.fullmatch(md5):
         log("Skipped: missing or invalid MD5 filename.")

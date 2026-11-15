@@ -211,6 +211,8 @@ Open **Open image downloader** under **2. Download images (optional)**. Add a
 Danbooru or Gelbooru search, enter space-separated tags, set a **Post limit**,
 and click **Start downloads**. A post limit counts posts checked, so 100 posts
 can yield fewer than 100 downloads. Optional blacklist tags apply to all rows.
+The `animated` tag is always blacklisted internally, even when the blacklist
+field is empty.
 
 Use the downloader's **Missing characters** tab to find Danbooru character tags
 created on or after a date (UTC). Set the minimum total Danbooru post count,
@@ -225,7 +227,7 @@ restrictive recorded rating (Explicit, Questionable, Sensitive, then General).
 **Absent only** means
 the character is entirely absent; **Below target** also fills missing ratings
 for characters already in the dataset.
-An optional **Score filter**, such as `score:>=10`, is added to each generated
+Enter an optional **Minimum score** number: `5` adds `score:>=5` to every generated
 search. Leave it blank for no score restriction. It filters downloads; the
 minimum post count and existing dataset count still consider all images.
 Counts use unique MD5 images in `done/` and optional `done1/`. Choose Danbooru,

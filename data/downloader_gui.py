@@ -19,6 +19,17 @@ from character_discovery import CharacterOptions, discover, search_rows
 SETTINGS_FILE = PROJECT_DIR / "data" / "caches" / "downloader_settings.json"
 
 
+def minimum_score_filter(value):
+    """Turn an optional minimum-score number into a search metatag."""
+    value = value.strip()
+    if not value:
+        return ''
+    try:
+        return f'score:>={int(value)}'
+    except ValueError:
+        raise ValueError('Minimum score must be a whole number, or blank.') from None
+
+
 def search_identity(row):
     """Compare equivalent single-character searches regardless of token order."""
     source, query = row['source'], row['tags']
@@ -214,7 +225,7 @@ class DownloaderGUI:
         for index, (key, title, choices) in enumerate((
                 ('since', 'Tag created on/after (YYYY-MM-DD)', None),
                 ('min_posts', 'Minimum posts on Danbooru', None),
-                ('score_filter', 'Score filter (optional, e.g. score:>=10)', None),
+                ('score_filter', 'Minimum score (optional number, e.g. 5)', None),
                 ('source', 'Queue download sources', ('Danbooru', 'Gelbooru', 'Both')),
                 ('scope', 'Characters to include', ('Absent only', 'Below target')))):
             ttk.Label(fields, text=title).grid(row=index, column=0, sticky='w', pady=6, padx=(0, 18))
@@ -252,10 +263,10 @@ class DownloaderGUI:
         try:
             values = {key: value.get().strip() for key, value in self.character_fields.items()}
             options = CharacterOptions(values['since'], int(values['min_posts']), sum(int(values[f'rating_{r}']) for r in 'gsqe'),
-                                       values['source'], values['scope'], values['score_filter'],
+                                       values['source'], values['scope'], minimum_score_filter(values['score_filter']),
                                        tuple(int(values[f'rating_{r}']) for r in 'gsqe'))
         except (ValueError, TypeError):
-            messagebox.showerror('Missing characters', 'Enter a valid YYYY-MM-DD date, positive minimum posts, nonnegative rating targets (at least one above zero), and an optional score filter such as score:>=10.', parent=self.root)
+            messagebox.showerror('Missing characters', 'Enter a valid YYYY-MM-DD date, positive minimum posts, nonnegative rating targets (at least one above zero), and an optional whole-number minimum score such as 5.', parent=self.root)
             return
         self.save_settings()
         self.discovery_cancel.clear()
@@ -366,7 +377,10 @@ class DownloaderGUI:
         if isinstance(saved_characters, dict):
             for key, variable in self.character_fields.items():
                 if isinstance(saved_characters.get(key), str):
-                    variable.set(saved_characters[key])
+                    value = saved_characters[key]
+                    if key == 'score_filter' and value.lower().startswith('score:>='):
+                        value = value[len('score:>='):]
+                    variable.set(value)
         for row in rows:
             identifier = self.add_row(row["source"], row["tags"], row["limit"], str(row.get("target", "")))
             if isinstance(row.get('gap_group'), str):
@@ -381,8 +395,10 @@ class DownloaderGUI:
             self.settings_file.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_json(self.settings_file, settings, ensure_ascii=False, indent=2,
                               trailing_newline=True, prefix=".downloader-settings-")
+            return True
         except OSError:
             messagebox.showwarning("Image downloader", "Could not save downloader settings. Check folder permissions.", parent=self.root)
+            return False
 
     def update_row_count(self):
         self.row_count.set(f"{len(self.rows):,} searches")
@@ -686,7 +702,15 @@ class DownloaderGUI:
             self.discovery_cancel.set()
             self.close_job = self.root.after(100, self.finish_close)
         else:
-            self.save_settings()
+            if self.save_settings() is False:
+                # Keep the editable state available so a failed save can be
+                # retried instead of silently losing the queue on destruction.
+                self.closing = False
+                self.add_button.configure(state='normal')
+                self.start_button.configure(state='normal')
+                self.select_row()
+                self.status.set('Settings could not be saved. Fix permissions or disk space, then close again.')
+                return
             if self.poll_job is not None:
                 self.root.after_cancel(self.poll_job)
                 self.poll_job = None
