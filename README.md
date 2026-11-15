@@ -208,9 +208,14 @@ explains tag filtering, source metadata, and review criteria.
 ### Image downloader
 
 Open **Open image downloader** under **2. Download images (optional)**. Add a
-Danbooru or Gelbooru search, enter space-separated tags, set a **Post limit**,
-and click **Start downloads**. A post limit counts posts checked, so 100 posts
-can yield fewer than 100 downloads. Optional blacklist tags apply to all rows.
+Danbooru or Gelbooru search, enter one character/tag with optional rating and
+score filters, set a positive **Target image count**, and click **Start downloads**.
+The target is the desired total of matching images in images/ and done/; existing images
+reduce the amount downloaded. Optional blacklist tags apply to all rows.
+Edit searches directly in the queue: double-click a cell or select a row and
+press **F2**. **Enter** commits, **Escape** cancels, and **Tab** moves between
+cells. Edits are saved when committed. New rows default to a target of 200.
+Older saved rows without a target use their previous limit as the initial target.
 The `animated` tag is always blacklisted internally, even when the blacklist
 field is empty.
 
@@ -230,8 +235,10 @@ for characters already in the dataset.
 Enter an optional **Minimum score** number: `5` adds `score:>=5` to every generated
 search. Leave it blank for no score restriction. It filters downloads; the
 minimum post count and existing dataset count still consider all images.
-Counts use unique MD5 images in `done/` and optional `done1/`. Choose Danbooru,
-Gelbooru, or both as download sources; character discovery always uses Danbooru.
+Counts use unique MD5 images in `images/` and `done/`, including queued batches.
+Source `.txt` files provide matching tags; if missing or empty, target counting uses the
+image's `.tag` file instead.
+Choose Danbooru, Gelbooru, or both as download sources; character discovery always uses Danbooru.
 Click **Find and add missing characters** to append searches without starting
 downloads. Existing searches are retained and duplicates are skipped.
 Rerunning discovery updates targets on matching eligible searches it generated. Editing a search
@@ -239,6 +246,8 @@ manually keeps its custom target on subsequent discovery runs.
 Both sources use the same target for each rating, so Gelbooru fills any remaining gap. Review the
 search queue before starting downloads. Discovery settings are remembered,
 and **Export last results as JSON** saves the eligible character list.
+**Export character tags as TXT** saves all discovered names once, comma-separated,
+for example `classic_sombra, beauty\_(nikke)`.
 Tag creation dates describe when the tag was added to Danbooru, not when a
 character debuted or when its first image was posted.
 
@@ -253,8 +262,8 @@ Select **Open dataset manager**, choose folders, and click **Scan selected**.
 Filter tag counts by category or dataset, preview matching images, and export
 statistics as CSV. Scanning does not modify dataset files.
 
-Use **Download more…** on selected tags to prepare searches. Set **Target in done**
-to fill a dataset toward a desired count; leave it blank for ordinary downloads.
+Use **Download more…** on selected tags to prepare searches. Set **Target image count**
+to fill a dataset toward a desired count. Every row requires a positive target.
 
 ### Copy, move, and export
 

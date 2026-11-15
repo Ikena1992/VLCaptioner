@@ -2,7 +2,7 @@
 import queue
 import json
 from pathlib import Path
-from file_io import atomic_write_json
+from file_io import atomic_write_json, atomic_write_text
 import threading
 import uuid
 import tkinter as tk
@@ -14,7 +14,7 @@ import ttkbootstrap as ttk
 from booru_downloader import DatasetCountError, DownloadJob, ImageIndex, failure_reason, gap_tag, parse_blacklist, run_job, query_rating, SCORE_FILTER
 from runtime_config import PROJECT_DIR
 import caption_queue
-from character_discovery import CharacterOptions, discover, search_rows
+from character_discovery import CharacterOptions, discover, search_rows, character_tags_text
 
 SETTINGS_FILE = PROJECT_DIR / "data" / "caches" / "downloader_settings.json"
 
@@ -47,23 +47,15 @@ def download_job_from_row(row, blacklist):
         raise ValueError('Search tags are empty.')
     if row['source'] not in ('Danbooru', 'Gelbooru'):
         raise ValueError('Choose Danbooru or Gelbooru.')
-    target = row.get('target', '').strip()
-    if target:
-        try:
-            target = int(target)
-            if target < 1:
-                raise ValueError()
-        except ValueError:
-            raise ValueError('Target in done must be a positive whole number.') from None
-        gap_tag(row['source'], tags)
-        return DownloadJob(row['source'], tags, 100, blacklist, target)
     try:
-        limit = int(row['limit'])
-        if limit < 1:
+        target = int(row.get('target', '').strip())
+        if target < 1:
             raise ValueError()
-    except ValueError:
-        raise ValueError('Post limit must be a positive whole number when Target in done is blank.') from None
-    return DownloadJob(row['source'], tags, limit, blacklist)
+    except (ValueError, TypeError):
+        raise ValueError('Target image count must be a positive whole number.') from None
+    gap_tag(row['source'], tags)
+    return DownloadJob(row['source'], tags, blacklist=blacklist, target_count=target)
+
 
 
 class DownloaderGUI:
@@ -73,6 +65,7 @@ class DownloaderGUI:
         self.can_start = can_start or (lambda automatic: True)
         self.rows = {}
         self.loading_editor = False
+        self.cell_edit = None
         self.events = queue.Queue()
         self.cancel = threading.Event()
         self.running = False
@@ -110,6 +103,8 @@ class DownloaderGUI:
         self.add_button.pack(side="left")
         self.remove_button = ttk.Button(row_tools, text="Remove selected", command=self.remove_selected, bootstyle="secondary-outline")
         self.remove_button.pack(side="left", padx=8)
+        self.remove_all_button = ttk.Button(row_tools, text='Remove all', command=self.remove_all, bootstyle='danger-outline')
+        self.remove_all_button.pack(side='left')
         self.row_count = tk.StringVar()
         ttk.Label(row_tools, textvariable=self.row_count, bootstyle="secondary").pack(side="right")
         table_panel = ttk.Frame(search_page)
@@ -118,42 +113,45 @@ class DownloaderGUI:
         table_panel.columnconfigure(0, weight=1)
         ttk.Style().configure("DownloadRows.Treeview",
                               rowheight=max(30, tkfont.nametofont("TkDefaultFont").metrics("linespace") + 10))
-        self.table = ttk.Treeview(table_panel, columns=("source", "tags", "limit", "target"),
+        self.table = ttk.Treeview(table_panel, columns=("source", "tags", "target"),
                                  show="headings", selectmode="extended", height=7,
                                  style="DownloadRows.Treeview")
-        for column, title, width in (("source", "Source", 110), ("tags", "Search tags", 430), ("limit", "Post limit", 100), ("target", "Target in done", 120)):
+        for column, title, width in (("source", "Source", 110), ("tags", "Search tags", 430), ("target", "Target image count", 160)):
             self.table.heading(column, text=title)
             self.table.column(column, width=width, minwidth=80, stretch=column == "tags")
         self.table.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(table_panel, orient="vertical", command=self.table.yview)
-        horizontal = ttk.Scrollbar(table_panel, orient="horizontal", command=self.table.xview)
+        scrollbar = ttk.Scrollbar(table_panel, orient="vertical", command=lambda *args: (self.finish_cell_edit(), self.table.yview(*args)))
+        horizontal = ttk.Scrollbar(table_panel, orient="horizontal", command=lambda *args: (self.finish_cell_edit(), self.table.xview(*args)))
         self.table.configure(yscrollcommand=scrollbar.set, xscrollcommand=horizontal.set)
         scrollbar.grid(row=0, column=1, sticky="ns")
         horizontal.grid(row=1, column=0, sticky="ew")
         self.table.bind("<<TreeviewSelect>>", self.select_row)
         self.table.bind("<Delete>", lambda event: self.remove_selected())
-        editor = ttk.Labelframe(search_page, text="Edit selected search", padding=10)
-        editor.pack(fill="x", pady=(10, 0))
-        editor.columnconfigure(1, weight=1)
+        self.table.bind('<Double-1>', self.edit_clicked_cell)
+        self.table.bind('<Button-1>', lambda event: self.finish_cell_edit_on_navigation(event))
+        self.table.bind('<F2>', self.edit_focused_cell)
+        self.table.bind('<Configure>', lambda event: self.finish_cell_edit())
+        self.table.bind('<MouseWheel>', self.finish_cell_edit_on_navigation)
         self.edit_source = tk.StringVar(value="Danbooru")
         self.edit_tags = tk.StringVar()
-        self.edit_limit = tk.StringVar(value="100")
         self.edit_target = tk.StringVar()
         self.editor_widgets = [
-            ttk.Combobox(editor, textvariable=self.edit_source, values=("Danbooru", "Gelbooru"), state="readonly", width=12),
-            ttk.Entry(editor, textvariable=self.edit_tags),
-            ttk.Entry(editor, textvariable=self.edit_limit, width=9),
-            ttk.Entry(editor, textvariable=self.edit_target, width=12),
+            ttk.Combobox(self.table, textvariable=self.edit_source, values=("Danbooru", "Gelbooru"), state="readonly", width=12),
+            ttk.Entry(self.table, textvariable=self.edit_tags),
+            ttk.Entry(self.table, textvariable=self.edit_target, width=12),
         ]
-        for column, (title, widget) in enumerate(zip(("Source", "Search tags", "Post limit", "Target in done"), self.editor_widgets)):
-            ttk.Label(editor, text=title, bootstyle="secondary").grid(row=0, column=column, sticky="w", padx=(0, 8), pady=(0, 4))
-            widget.grid(row=1, column=column, sticky="ew", padx=(0, 8))
+        for widget in self.editor_widgets:
+            widget.bind('<Return>', lambda event: self.finish_cell_key())
+            widget.bind('<Escape>', lambda event: self.finish_cell_key(cancel=True))
+            widget.bind('<Tab>', lambda event: self.next_edit_cell(1))
+            widget.bind('<Shift-Tab>', lambda event: self.next_edit_cell(-1))
+            widget.bind('<FocusOut>', self.finish_unfocused_cell)
+        self.editor_widgets[0].bind('<<ComboboxSelected>>', lambda event: self.finish_cell_edit())
         self.editor_hint = tk.StringVar(value="Select one search to edit. Changes are saved immediately to the row.")
-        ttk.Label(editor, textvariable=self.editor_hint, bootstyle="secondary", wraplength=760).grid(
-            row=2, column=0, columnspan=4, sticky="w", pady=(8, 0))
-        for variable in (self.edit_source, self.edit_tags, self.edit_limit, self.edit_target):
+        ttk.Label(search_page, textvariable=self.editor_hint, bootstyle="secondary", wraplength=800).pack(anchor='w', pady=(8, 0))
+        for variable in (self.edit_source, self.edit_tags, self.edit_target):
             variable.trace_add("write", self.update_selected_row)
-        ttk.Label(search_page, text="Use spaces between tags and underscores within tags, e.g. blue_eyes long_hair. Ctrl / Shift selects multiple searches for removal.",
+        ttk.Label(search_page, text="Double-click a cell or press F2 to edit. Enter saves; Esc cancels; Tab moves between cells. Use spaces between tags and underscores within tags. Ctrl / Shift selects multiple rows.",
                   bootstyle="secondary", wraplength=800).pack(anchor="w", pady=(8, 0))
 
         filters = ttk.Labelframe(settings_page, text="Tag blacklist", padding=12)
@@ -177,12 +175,10 @@ class DownloaderGUI:
         self.batch_entry.pack(side="left")
         ttk.Label(batching, text="Smaller batches give earlier results; larger batches reduce model switches. Leftover images form the final batch. Keep the Caption GUI open; use Options for caption settings and Queue for progress.",
                   wraplength=780, bootstyle="secondary").pack(anchor="w")
-        help_panel = ttk.Labelframe(settings_page, text="How download limits work", padding=12)
+        help_panel = ttk.Labelframe(settings_page, text="How download targets work", padding=12)
         help_panel.pack(fill="x")
-        ttk.Label(help_panel, text="Post limit counts posts checked, including duplicates, blacklisted posts, missing files and failures. Checking 100 posts may download fewer than 100 images. Existing MD5 filenames in images/, done/ and done1/ are skipped.",
+        ttk.Label(help_panel, text="Target image count is the desired total of matching images in images/ and done/. Downloads fill the missing amount and stop when the target is covered or results run out. Duplicates, blacklisted posts and failed downloads do not consume the target. Use one character/tag per row, optionally filtered by rating and minimum score. Enable automatic captioning to send downloads through to done/.",
                   wraplength=780, justify="left").pack(anchor="w")
-        ttk.Label(help_panel, text="Target in done fills a dataset gap for a single tag. It counts done/ and done1/, ignores the post limit, and downloads until the gap is covered or results run out. Leave the target blank for normal downloads. Enable automatic captioning to send downloads through to done/.",
-                  wraplength=780, justify="left").pack(anchor="w", pady=(10, 0))
 
         controls = ttk.Frame(frame)
         controls.pack(fill="x", pady=(12, 8))
@@ -213,7 +209,7 @@ class DownloaderGUI:
         notebook.add(page, text='Missing characters')
         ttk.Label(page, text='Find new character tags', font=('Segoe UI', 16, 'bold')).pack(anchor='w')
         ttk.Label(page, text='Discover Danbooru character tags created on or after the date (UTC). '
-                  'Compare unique images in done/ and done1/. Add searches without starting downloads.',
+                  'Compare unique images in images/ and done/. Add searches without starting downloads.',
                   wraplength=780).pack(anchor='w', pady=(8, 16))
         fields = ttk.Frame(page)
         fields.pack(fill='x')
@@ -253,7 +249,10 @@ class DownloaderGUI:
         self.discover_button.pack(side='left')
         self.discovery_stop = ttk.Button(actions, text='Cancel search', command=self.discovery_cancel.set, state='disabled')
         self.discovery_stop.pack(side='left', padx=8)
-        ttk.Button(actions, text='Export last results as JSON', command=self.export_characters).pack(side='left')
+        exports = ttk.Frame(page)
+        exports.pack(fill='x', pady=(8, 0))
+        ttk.Button(exports, text='Export last results as JSON', command=self.export_characters).pack(side='left')
+        ttk.Button(exports, text='Export character tags as TXT', command=self.export_character_tags).pack(side='left', padx=8)
         self.discovery_status = tk.StringVar(value='Ready. Existing queue rows are kept; duplicate searches are skipped.')
         ttk.Label(page, textvariable=self.discovery_status, wraplength=780).pack(anchor='w', pady=16)
 
@@ -297,6 +296,7 @@ class DownloaderGUI:
     def add_character_results(self, results, source):
         if self.closing or self.discovery_cancel.is_set():
             return
+        self.finish_cell_edit()
         self.character_results = results
         existing = {search_identity(row): identifier for identifier, row in self.rows.items()}
         blank_rows = iter(identifier for identifier, row in self.rows.items() if not row['tags'].strip())
@@ -310,16 +310,16 @@ class DownloaderGUI:
                 # preserving manually entered rows and their custom targets.
                 if previous.get('character_generated') and previous['target'] != row['target']:
                     previous['target'] = row['target']
-                    self.table.item(identifier, values=tuple(previous[k] for k in ('source', 'tags', 'limit', 'target')))
+                    self.table.item(identifier, values=tuple(previous[k] for k in ('source', 'tags', 'target')))
                     updated += 1
                 continue
             blank = next(blank_rows, None)
             if blank is None:
-                identifier = self.add_row(row['source'], row['tags'], row['limit'], row['target'])
+                identifier = self.add_row(row['source'], row['tags'], row['target'])
             else:
                 identifier = blank
                 self.rows[blank] = row
-                self.table.item(blank, values=tuple(row[k] for k in ('source', 'tags', 'limit', 'target')))
+                self.table.item(blank, values=tuple(row[k] for k in ('source', 'tags', 'target')))
             self.rows[identifier]['character_generated'] = True
             existing[key] = identifier
             added += 1
@@ -332,16 +332,36 @@ class DownloaderGUI:
         if not self.character_results:
             messagebox.showinfo('Missing characters', 'Complete a character search first.', parent=self.root)
             return
+        results = list(self.character_results)
         filename = filedialog.asksaveasfilename(parent=self.root, defaultextension='.json',
                                               filetypes=[('JSON', '*.json')], initialfile='missing_characters.json')
         if filename:
             try:
-                atomic_write_json(Path(filename), self.character_results, ensure_ascii=False, indent=2, trailing_newline=True)
+                atomic_write_json(Path(filename), results, ensure_ascii=False, indent=2, trailing_newline=True)
+                self.discovery_status.set(f'Exported {len(results):,} character results to {filename}')
             except OSError:
                 messagebox.showerror('Missing characters', 'Could not save the JSON file.', parent=self.root)
 
     def update_batch_controls(self):
         self.batch_entry.configure(state="normal" if self.auto_caption.get() and not self.running else "disabled")
+
+    def export_character_tags(self):
+        if not self.character_results:
+            messagebox.showinfo('Missing characters', 'Complete a character search first.', parent=self.root)
+            return
+        # Native file dialogs run a nested event loop. Capture this result set
+        # before opening one, so a finishing search cannot change the export.
+        results = list(self.character_results)
+        text = character_tags_text(results)
+        count = len({result['name'] for result in results})
+        filename = filedialog.asksaveasfilename(parent=self.root, defaultextension='.txt',
+                                              filetypes=[('Text files', '*.txt')], initialfile='character_tags.txt')
+        if filename:
+            try:
+                atomic_write_text(Path(filename), text)
+                self.discovery_status.set(f'Exported {count:,} character tags to {filename}')
+            except OSError:
+                messagebox.showerror('Missing characters', 'Could not save the TXT file.', parent=self.root)
 
     def apply_theme(self):
         colors = ttk.Style().colors
@@ -359,7 +379,7 @@ class DownloaderGUI:
                 raise ValueError()
             for row in rows:
                 if (not isinstance(row, dict) or row.get("source") not in ("Danbooru", "Gelbooru")
-                        or not isinstance(row.get("tags"), str) or not isinstance(row.get("limit"), str)):
+                        or not isinstance(row.get("tags"), str)):
                     raise ValueError()
         except FileNotFoundError:
             self.add_row()
@@ -382,7 +402,11 @@ class DownloaderGUI:
                         value = value[len('score:>='):]
                     variable.set(value)
         for row in rows:
-            identifier = self.add_row(row["source"], row["tags"], row["limit"], str(row.get("target", "")))
+            target = str(row.get('target', '')).strip()
+            if not target:
+                legacy = str(row.get('limit', '')).strip()
+                target = legacy if legacy.isdecimal() and int(legacy) > 0 else '200'
+            identifier = self.add_row(row["source"], row["tags"], target)
             if isinstance(row.get('gap_group'), str):
                 self.rows[identifier]['gap_group'] = row['gap_group']
             if row.get('character_generated') is True:
@@ -403,9 +427,9 @@ class DownloaderGUI:
     def update_row_count(self):
         self.row_count.set(f"{len(self.rows):,} searches")
 
-    def add_row(self, source_value="Danbooru", tags_value="", limit_value="100", target_value=""):
-        identifier = self.table.insert("", "end", values=(source_value, tags_value, limit_value, target_value))
-        self.rows[identifier] = dict(source=source_value, tags=tags_value, limit=limit_value, target=target_value)
+    def add_row(self, source_value="Danbooru", tags_value="", target_value="200"):
+        identifier = self.table.insert("", "end", values=(source_value, tags_value, target_value))
+        self.rows[identifier] = dict(source=source_value, tags=tags_value, target=target_value)
         return identifier
 
     def prepare_gap_download(self, tag):
@@ -423,7 +447,7 @@ class DownloaderGUI:
             else:
                 self.rows[identifier].update(source=source, tags=query, target=target)
                 row = self.rows[identifier]
-                self.table.item(identifier, values=(source, query, row['limit'], target))
+                self.table.item(identifier, values=(source, query, target))
             identifiers.append(identifier)
             self.rows[identifier]['gap_group'] = group
         identifier = identifiers[0]
@@ -434,7 +458,7 @@ class DownloaderGUI:
         self.update_batch_controls()
         self.update_row_count()
         self.status.set('Set the desired total in done/, then click Start downloads.')
-        self.editor_widgets[3].focus_set()
+        self.begin_cell_edit(identifier, 2)
 
     def new_row(self):
         if self.running or self.closing:
@@ -443,17 +467,89 @@ class DownloaderGUI:
         self.table.selection_set(identifier)
         self.table.see(identifier)
         self.select_row()
-        self.editor_widgets[1].focus_set()
+        self.begin_cell_edit(identifier, 1)
         self.update_row_count()
+
+    def edit_clicked_cell(self, event):
+        if self.table.identify_region(event.x, event.y) != 'cell':
+            return
+        identifier = self.table.identify_row(event.y)
+        column = int(self.table.identify_column(event.x)[1:]) - 1
+        self.begin_cell_edit(identifier, column)
+        return 'break'
+
+    def edit_focused_cell(self, event=None):
+        selected = self.table.selection()
+        if len(selected) == 1:
+            self.begin_cell_edit(selected[0], 1)
+        return 'break'
+
+    def begin_cell_edit(self, identifier, column):
+        self.finish_cell_edit()
+        if self.running or self.closing or identifier not in self.rows or column not in range(3):
+            return False
+        self.table.selection_set(identifier)
+        self.table.focus(identifier)
+        self.select_row()
+        self.table.see(identifier)
+        self.root.update_idletasks()
+        bounds = self.table.bbox(identifier, ('source', 'tags', 'target')[column])
+        if not bounds:
+            return False
+        self.cell_edit = (identifier, column, dict(self.rows[identifier]))
+        widget = self.editor_widgets[column]
+        x, y, width, height = bounds
+        widget.place(x=x, y=y, width=width, height=height)
+        widget.focus_set()
+        widget.selection_range(0, 'end')
+        return True
+
+    def finish_cell_edit(self, cancel=False):
+        if self.cell_edit is None:
+            return 'break'
+        identifier, column, original = self.cell_edit
+        self.cell_edit = None
+        self.editor_widgets[column].place_forget()
+        if cancel and identifier in self.rows:
+            self.rows[identifier] = original
+            self.table.item(identifier, values=tuple(original[k] for k in ('source', 'tags', 'target')))
+            self.select_row()
+        elif identifier in self.rows and self.rows[identifier] != original:
+            self.save_settings()
+        return 'break'
+
+    def finish_unfocused_cell(self, event):
+        if self.cell_edit and self.editor_widgets[self.cell_edit[1]] is event.widget:
+            self.finish_cell_edit()
+
+    def finish_cell_edit_on_navigation(self, event):
+        self.finish_cell_edit()
+        # Let the Treeview class binding select rows, resize columns or scroll.
+
+    def finish_cell_key(self, cancel=False):
+        self.finish_cell_edit(cancel=cancel)
+        self.table.focus_set()
+        return 'break'
+
+    def next_edit_cell(self, direction):
+        if self.cell_edit is None:
+            return 'break'
+        identifier, column, _ = self.cell_edit
+        self.finish_cell_edit()
+        for offset in range(1, 4):
+            if self.begin_cell_edit(identifier, (column + direction * offset) % 3):
+                break
+        return 'break'
 
     def select_row(self, event=None):
         selected = self.table.selection()
+        if self.cell_edit and selected != (self.cell_edit[0],):
+            self.finish_cell_edit()
         row = self.rows.get(selected[0]) if len(selected) == 1 else None
         self.loading_editor = True
         try:
             self.edit_source.set(row["source"] if row else "Danbooru")
             self.edit_tags.set(row["tags"] if row else "")
-            self.edit_limit.set(row["limit"] if row else "")
             self.edit_target.set(row.get("target", "") if row else "")
         finally:
             self.loading_editor = False
@@ -461,8 +557,8 @@ class DownloaderGUI:
             self.editor_hint.set("Select one search to edit." if not selected else
                                  f"{len(selected):,} searches selected. Choose one to edit, or remove the selection.")
         else:
-            self.editor_hint.set("Target mode: post limit is ignored. Counts completed images in done/ and done1/." if self.edit_target.get().strip() else
-                                 "Changes update this row immediately. Leave Target in done blank to use the post limit.")
+            self.editor_hint.set("Target image count is the desired total of matching images in images/ and done/." if self.edit_target.get().strip() else
+                                 "Enter a positive target before starting downloads.")
         self.set_row_controls(not self.running and not self.closing)
 
     def update_selected_row(self, *args):
@@ -473,15 +569,16 @@ class DownloaderGUI:
             return
         row = self.rows[selected[0]]
         row.pop('character_generated', None)
-        row.update(source=self.edit_source.get(), tags=self.edit_tags.get(), limit=self.edit_limit.get(), target=self.edit_target.get())
-        self.table.item(selected[0], values=(row["source"], row["tags"], row["limit"], row["target"]))
-        self.editor_hint.set("Target mode: post limit is ignored. Counts completed images in done/ and done1/." if row["target"].strip() else
-                             "Changes update this row immediately. Leave Target in done blank to use the post limit.")
+        row.update(source=self.edit_source.get(), tags=self.edit_tags.get(), target=self.edit_target.get())
+        self.table.item(selected[0], values=(row["source"], row["tags"], row["target"]))
+        self.editor_hint.set("Target image count is the desired total of matching images in images/ and done/." if row["target"].strip() else
+                             "Enter a positive target before starting downloads.")
         self.set_row_controls(True)
 
     def remove_selected(self):
         if self.running or self.closing:
             return
+        self.finish_cell_edit()
         selected = self.table.selection()
         for identifier in selected:
             self.rows.pop(identifier, None)
@@ -492,17 +589,29 @@ class DownloaderGUI:
         self.select_row()
         self.update_row_count()
 
+    def remove_all(self):
+        if self.running or self.closing or not self.rows:
+            return
+        self.finish_cell_edit()
+        self.table.delete(*self.table.get_children())
+        self.rows.clear()
+        self.select_row()
+        self.update_row_count()
+        self.save_settings()
+
     def set_row_controls(self, enabled):
         selected = self.table.selection()
         self.remove_button.configure(state="normal" if enabled and selected else "disabled")
+        self.remove_all_button.configure(state='normal' if enabled and self.rows else 'disabled')
         editable = enabled and len(selected) == 1
         for index, widget in enumerate(self.editor_widgets):
-            active = editable and not (index == 2 and self.edit_target.get().strip())
+            active = editable
             widget.configure(state=("readonly" if index == 0 else "normal") if active else "disabled")
 
     def start(self):
         if self.running or self.discovery_running or self.closing:
             return
+        self.finish_cell_edit()
         if not self.can_start(self.auto_caption.get()):
             self.status.set("Wait for captioning or copy / move to finish before downloading.")
             return
@@ -564,9 +673,9 @@ class DownloaderGUI:
                 self.events.put(("log", "Another downloader is already running. Wait for it to finish, then start again."))
                 return
             images, done = PROJECT_DIR / "images", PROJECT_DIR / "done"
-            self.events.put(("log", "Scanning images/, done/, and done1/ for existing MD5 filenames…"))
+            self.events.put(("log", "Scanning local image folders for existing MD5 filenames…"))
             known = ImageIndex(images, done)
-            self.events.put(("log", f"Found {len(known)} existing MD5 images in images/, done/, and done1/."))
+            self.events.put(("log", f"Found {len(known)} existing MD5 images in local image folders."))
             def received(path):
                 nonlocal batch_id, batch_count, batch_handle
                 batch_count += 1
@@ -689,6 +798,7 @@ class DownloaderGUI:
     def close(self):
         if self.closing:
             return
+        self.finish_cell_edit()
         self.closing = True
         self.add_button.configure(state="disabled")
         self.start_button.configure(state="disabled")

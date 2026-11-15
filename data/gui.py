@@ -192,7 +192,7 @@ class PipelineGUI:
         ttk.Label(downloads, text="Get original images from Danbooru or Gelbooru using tag searches.",
                   wraplength=810, justify="left").pack(anchor="w")
         ttk.Label(downloads, text="Images and matching tag files are saved to images/. "
-                  "Images already in images/, done/, or done1/ are skipped.",
+                  "Images already in images/ or done/ are skipped.",
                   wraplength=810, justify="left").pack(anchor="w", pady=(4, 8))
         download_tools = ttk.Frame(downloads)
         download_tools.pack(anchor="w")

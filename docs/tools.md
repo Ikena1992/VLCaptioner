@@ -6,11 +6,11 @@
 
 ### Image downloader
 
-Download searches use a compact table suitable for thousands of rows. Select a
-row and edit its source, search tags, and post limit in the fields below the table.
+Download searches use a compact table suitable for thousands of rows. Double-click
+a cell to edit its source, search tags, or target directly in the table.
 Use **Search queue** to manage searches and **Filters & captioning** to set the
-shared blacklist and automatic caption batches. A target in done disables the
-post limit because gap mode uses the target instead.
+shared blacklist and automatic caption batches. Each search needs a positive
+**Target image count**: the desired total of matching images in images/ and done/.
 Changes are saved with the downloader settings. Use Ctrl or Shift to select
 multiple rows, then **Remove selected** (or Delete) to remove them.
 
@@ -44,17 +44,16 @@ Ollama. No separate downloader launcher is needed. On Windows, `GUI.cmd`
 launches `data/GUI.pyw` using the installed Python environment.
 
 1. Add a row for each search and choose **Danbooru** or **Gelbooru**.
-2. Enter space-separated search tags, such as `blue_eyes long_hair`.
-3. Set a positive **Post limit**. This is the number of posts checked, including
-   blacklisted posts, images already in `images/` or `done/`, unavailable
-   originals, unsupported files, and failed downloads. A limit of 100 can
-   download fewer than 100 images.
+2. Enter one positive character/tag, optionally with rating and score filters,
+   such as `character_a rating:general score:>=5 order:score` on Danbooru.
+3. Set a positive **Target image count**. Existing matching images reduce the gap;
+   blacklisted posts, duplicates and failed downloads do not consume the target.
 4. Optionally enter a **Tag blacklist**, such as `tall_image watermark comic`.
    Use spaces, just like search tags. Keep underscores within tags:
    `tall_image` matches that tag; `tall image` does not. Any matching blacklist
    tag skips the image. Matching uses whole tags and ignores letter case and
    extra spaces. The blacklist applies to every row; leave it blank to allow
-   all tags. Older saved comma-separated blacklists are converted on reopening.
+   all other tags; `animated` is always excluded. Older saved comma-separated blacklists are converted on reopening.
 5. Select **Start downloads**. Rows run sequentially. **Stop** cancels the queue;
    an active network request may need to return first. Closing the window
    waits for cancellation and cleanup.
@@ -74,7 +73,7 @@ downloads automatically.
 
 The log shows search pages, post IDs, original filenames, tag-file preparation,
 and reasons for skips (including the matching blacklist tags or existing MD5
-images). It also explains download failures and when the post limit is reached.
+images). It also explains download failures and when the target is reached.
 Each row ends with downloaded, skipped, blacklisted, unavailable, and failed counts.
 
 Matching MD5 image filenames anywhere in `images/` or `done/` (including subfolders
@@ -109,16 +108,14 @@ Select one or more tags (Ctrl-click or Shift-click) and click **Download more…
 to add a pair of downloader rows for each tag: a Danbooru row with `order:score`
 and a Gelbooru row with `sort:score`, with automatic captioning enabled.
 Both rows share gap progress, so the second source fills only the remaining gap.
-Set **Target in done** independently for each row to the desired total
-number of matching images in `done/`, then start downloads. Gap filling uses
-one positive tag per row and counts matching image/TXT pairs in `done/` and
-`done1/` when available. Copies sharing an MD5 filename count only once.
-It downloads the difference, ignoring the post limit; duplicates, blacklisted
+Set **Target image count** independently for each row to the desired total
+number of matching images across `images/` and `done/`, then start downloads. Gap filling uses
+one positive tag per row and counts matching image/TXT pairs in `images/` and `done/`. Copies sharing an MD5 filename count only once.
+It downloads the difference; duplicates, blacklisted
 posts, and failed downloads do not consume the gap. It stops when enough new
-images have downloaded, search results run out, or you click Stop. Leave the
-target blank for ordinary downloads. Captioning must finish successfully to
-reach the target in `done/`; rerun gap filling after captioning if images failed
-or went to review. `done1/` also remains an optional duplicate-check folder.
+images have downloaded, search results run out, or you click Stop. Pending
+downloads count toward the target before captioning. Rerun gap filling after
+captioning if images failed or went to review.
 
 The combined dataset counts each image once, including when selected folders
 overlap. Each dataset column counts membership in its own folder. Caption

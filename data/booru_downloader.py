@@ -132,7 +132,7 @@ class ImageIndex(set):
             return
         for folder in (self.images, self.done, self.done1):
             for md5 in existing_hashes(folder):
-                self.locations[md5] = folder.name + "/"
+                self.locations[md5] = "the local dataset" if folder == self.done1 else folder.name + "/"
                 self.add(md5)
         self.last_scan = time.monotonic()
 
@@ -199,7 +199,7 @@ def save_original(post, source, images, done, known, cancel, log=lambda message:
         # Standalone callers without an index still receive a current folder check.
         done1 = done.parent / "done1"
         present = md5 in known or md5 in existing_hashes(images, done, done1)
-        location = "done1/" if md5 in existing_hashes(done1) else "done/" if md5 in existing_hashes(done) else "images/ or earlier in this queue"
+        location = "the local dataset" if md5 in existing_hashes(done1) else "done/" if md5 in existing_hashes(done) else "images/ or earlier in this queue"
     if present:
         log(f"Skipped: matching MD5 image already in {location}.")
         known.add(md5)
@@ -244,7 +244,7 @@ def save_original(post, source, images, done, known, cancel, log=lambda message:
         else:
             present = md5 in existing_hashes(images, done, done.parent / "done1")
         if present:
-            log("Skipped: matching image appeared in images/, done/, or done1/ during the download.")
+            log("Skipped: matching image appeared in the local dataset during the download.")
             known.add(md5)
             return "skipped"
         stage = "tag files"
@@ -296,13 +296,15 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
         snapshot_key = ('dataset_counts', str(done.resolve()))
         downloaded_key = ('downloaded_counts', str(done.resolve()))
         if snapshot_key not in gap_progress:
-            folders = [folder for folder in (done, done.parent / 'done1') if folder.exists()]
-            log('Counting tags in done/ and optional done1/ once for this download run...')
-            dataset = scan_dataset(folders, cancelled=cancel.is_set)
+            folders = [folder for folder in (images, done, done.parent / 'done1') if folder.exists()]
+            log('Counting tags in images/ and done/ once for this download run...')
+            dataset = scan_dataset(folders, cancelled=cancel.is_set, tag_fallback=True)
             if dataset is None:
                 return counts
             if dataset.warnings:
-                raise DatasetCountError("Could not reliably count done/ and done1/. Check unreadable tag files and folder permissions.")
+                raise DatasetCountError("Could not reliably count images/ and done/. Check unreadable tag files and folder permissions.")
+            if dataset.missing or dataset.empty:
+                log(f'{dataset.missing + dataset.empty:,} images have no usable tags and cannot be matched to targets.')
             snapshot = dataset_snapshot(dataset)
             gap_progress[snapshot_key] = snapshot
             gap_progress[downloaded_key] = {}
@@ -316,7 +318,7 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
         current = gap_progress[snapshot_key].get(key, 0)
         downloaded_earlier = progress.get(key, 0)
         gap = max(0, job.target_count - current - downloaded_earlier)
-        log(f"Fill gaps: {current} unique matching images initially in done/ and optional done1/, {downloaded_earlier} downloaded earlier; target {job.target_count}; need {gap} new images.")
+        log(f"Fill gaps: {current} unique matching images initially in images/ and done/, {downloaded_earlier} downloaded earlier; target {job.target_count}; need {gap} new images.")
         if not gap:
             return counts
     examined = 0

@@ -35,6 +35,17 @@ def normalize(tag):
     return re.sub(r'\s+', ' ', tag.strip().lower().replace(r'\(', '(').replace(r'\)', ')').replace('_', ' '))
 
 
+def read_dataset_tags(path):
+    content = path.read_text(encoding='utf-8-sig')
+    lines = []
+    for line in content.splitlines():
+        if line.strip().startswith('# VLTagger metadata:'):
+            break
+        if not line.lstrip().startswith('#'):
+            lines.append(line)
+    return {normalize(tag) for tag in re.split(r'[,\r\n]+', '\n'.join(lines)) if normalize(tag)}
+
+
 def load_categories(paths, cancelled=lambda: False):
     categories, warnings = {}, []
     for path in paths:
@@ -78,7 +89,7 @@ class Dataset:
     warnings: list = field(default_factory=list)
 
 
-def scan_dataset(folders, progress=lambda value: None, cancelled=lambda: False):
+def scan_dataset(folders, progress=lambda value: None, cancelled=lambda: False, *, tag_fallback=False):
     result = Dataset()
     # Cache parsed captions once, but count membership in each selected folder.
     scanned = {}
@@ -98,6 +109,14 @@ def scan_dataset(folders, progress=lambda value: None, cancelled=lambda: False):
             parent = Path(parent)
             txt = {Path(name).stem.casefold(): parent / name for name in sorted(names)
                    if is_source_tag_file(name)}
+            final_tags = {}
+            if tag_fallback:
+                # Download target counting can use final tags if the original
+                # source TXT is absent or empty. Prefer nonempty source TXT.
+                for name in sorted(names):
+                    if Path(name).suffix.lower() == '.tag':
+                        final_tags[Path(name).stem.casefold()] = parent / name
+                        txt.setdefault(Path(name).stem.casefold(), parent / name)
             image_stems = set()
             for name in sorted(names):
                 if cancelled():
@@ -127,14 +146,13 @@ def scan_dataset(folders, progress=lambda value: None, cancelled=lambda: False):
                     else:
                         result.caption_paths[image] = caption
                         try:
-                            content = caption.read_text(encoding='utf-8-sig')
-                            lines = []
-                            for line in content.splitlines():
-                                if line.strip().startswith('# VLTagger metadata:'):
-                                    break
-                                if not line.lstrip().startswith('#'):
-                                    lines.append(line)
-                            tags = {normalize(tag) for tag in re.split(r'[,\r\n]+', '\n'.join(lines)) if normalize(tag)}
+                            tags = read_dataset_tags(caption)
+                            fallback = final_tags.get(stem)
+                            if not tags and fallback is not None and fallback != caption:
+                                tags = read_dataset_tags(fallback)
+                                if tags:
+                                    caption = fallback
+                                    result.caption_paths[image] = caption
                             result.captions += 1
                             result.empty += not bool(tags)
                         except (OSError, UnicodeError) as error:
