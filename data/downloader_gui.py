@@ -15,10 +15,11 @@ try:
 except ImportError:
     from ttkbootstrap.scrolled import ScrolledFrame
 
-from booru_downloader import DatasetCountError, DownloadJob, ImageIndex, failure_reason, gap_tag, parse_blacklist, run_job, query_rating, SCORE_FILTER
+from booru_downloader import DatasetCountError, DownloadJob, ImageIndex, failure_reason, gap_tag, parse_blacklist, run_job, query_rating, query_official_art, SCORE_FILTER
 from runtime_config import PROJECT_DIR
 import caption_queue
 from character_discovery import CharacterOptions, discover, search_rows, character_tags_text
+from danbooru_client import request_context
 
 SETTINGS_FILE = PROJECT_DIR / "data" / "caches" / "downloader_settings.json"
 
@@ -45,7 +46,7 @@ def search_identity(row):
     try:
         tag = gap_tag(source, query).casefold()
         score = tuple(sorted(token.casefold() for token in query.split() if SCORE_FILTER.fullmatch(token)))
-        return source, tag, query_rating(query), score
+        return source, tag, query_rating(query), score, query_official_art(query)
     except ValueError:
         return source, ' '.join(query.casefold().split())
 
@@ -227,13 +228,15 @@ class DownloaderGUI:
                   wraplength=780).pack(anchor='w', pady=(8, 16))
         fields = ttk.Frame(page)
         fields.pack(fill='x')
-        defaults = {'since': '2025-01-01', 'min_posts': '100',
+        defaults = {'since': '2025-01-01', 'oldest_post_since': '', 'min_posts': '100',
                     'source': 'Both', 'scope': 'Below target', 'score_filter': '',
-                    'rating_g': '50', 'rating_s': '50', 'rating_q': '50', 'rating_e': '50', 'exclude_variants': 'no'}
+                    'rating_g': '50', 'rating_s': '50', 'rating_q': '50', 'rating_e': '50',
+                    'official_art_enabled': 'no', 'official_art_target': '10', 'exclude_variants': 'no'}
         self.character_fields = {key: tk.StringVar(value=value) for key, value in defaults.items()}
         self.character_widgets = []
         for index, (key, title, choices) in enumerate((
                 ('since', 'Tag created on/after (YYYY-MM-DD)', None),
+                ('oldest_post_since', 'Oldest image on/after (optional, YYYY-MM-DD)', None),
                 ('min_posts', 'Minimum posts on Danbooru', None),
                 ('score_filter', 'Minimum score (optional number, e.g. 5)', None),
                 ('source', 'Queue download sources', ('Danbooru', 'Gelbooru', 'Both')),
@@ -244,6 +247,10 @@ class DownloaderGUI:
             widget.grid(row=index, column=1, sticky='ew', pady=6)
             self.character_widgets.append(widget)
         fields.columnconfigure(1, weight=1)
+        ttk.Label(page, text='Oldest image date is a separate filter: the earliest accessible Danbooru post must fall '
+                  'between that date and today (UTC). Leave blank to disable. This age check ignores score, rating, '
+                  'and blacklist filters, and includes deleted records when accessible. Unavailable posts can make it incomplete.',
+                  wraplength=780, bootstyle='secondary').pack(anchor='w', pady=(6, 0))
         ttk.Checkbutton(page, text='Exclude likely outfit/variant tags (character implications)',
                         variable=self.character_fields['exclude_variants'], onvalue='yes', offvalue='no').pack(anchor='w', pady=(8, 0))
         ttk.Label(page, text='Not definitive: implications can be missing, so variants may still appear. '
@@ -258,10 +265,20 @@ class DownloaderGUI:
             widget.grid(row=1, column=index, sticky='ew', padx=6)
             ratings.columnconfigure(index, weight=1)
             self.character_widgets.append(widget)
+        official = ttk.Frame(page)
+        official.pack(fill='x', pady=(10, 0))
+        ttk.Checkbutton(official, text='Add official art row (Danbooru, all ratings), target:',
+                        variable=self.character_fields['official_art_enabled'],
+                        onvalue='yes', offvalue='no').pack(side='left', padx=(0, 12))
+        widget = ttk.Entry(official, textvariable=self.character_fields['official_art_target'], width=10)
+        widget.pack(side='left')
+        self.character_widgets.append(widget)
         ttk.Label(page, text='Minimum posts measures total Danbooru availability, before blacklist filtering. '
                   'Below target includes partially filled characters. Both sources share the same total target; '
                   'Gelbooru fills any gap left by Danbooru. Score filters restrict downloads, not the total post-count threshold '
-                  'or existing dataset counts. Enable automatic captioning to move downloads into done/.',
+                  'or existing dataset counts. The official art target counts images with both the character and official_art tags; '
+                  'its extra row uses Danbooru sorted by score, without a rating or minimum score filter. '
+                  'Enable automatic captioning to move downloads into done/.',
                   wraplength=780, bootstyle='secondary').pack(anchor='w', pady=16)
         actions = ttk.Frame(page)
         actions.pack(fill='x')
@@ -281,14 +298,19 @@ class DownloaderGUI:
             return
         try:
             values = {key: value.get().strip() for key, value in self.character_fields.items()}
-            options = CharacterOptions(values['since'], int(values['min_posts']), sum(int(values[f'rating_{r}']) for r in 'gsqe'),
+            official_target = int(values['official_art_target']) if values['official_art_enabled'] == 'yes' else 0
+            options = CharacterOptions(values['since'], int(values['min_posts']), sum(int(values[f'rating_{r}']) for r in 'gsqe') + official_target,
                                        values['source'], values['scope'], minimum_score_filter(values['score_filter']),
                                        tuple(int(values[f'rating_{r}']) for r in 'gsqe'),
-                                       exclude_variants=values['exclude_variants'] == 'yes')
+                                       exclude_variants=values['exclude_variants'] == 'yes',
+                                       oldest_post_since=values['oldest_post_since'],
+                                       official_art_target=official_target)
         except (ValueError, TypeError):
-            messagebox.showerror('Missing characters', 'Enter a valid YYYY-MM-DD date, positive minimum posts, nonnegative rating targets (at least one above zero), and an optional whole-number minimum score such as 5.', parent=self.root)
+            messagebox.showerror('Missing characters', 'Enter valid YYYY-MM-DD dates (oldest image date cannot be in the future), positive minimum posts, nonnegative rating and official art targets (at least one above zero), and an optional whole-number minimum score such as 5.', parent=self.root)
             return
-        self.save_settings()
+        if self.save_settings() is False:
+            self.discovery_status.set('Search not started: discovery settings could not be saved. Fix disk space or permissions, then retry.')
+            return
         self.discovery_cancel.clear()
         self.discovery_running = True
         self.discover_button.configure(state='disabled')
@@ -296,16 +318,29 @@ class DownloaderGUI:
         self.start_button.configure(state='disabled')
         self.discovery_status.set('Searching Danbooru API character tags…')
         def work():
+            phase = 'Requesting character tags'
+            def report(text):
+                nonlocal phase
+                # Retry notices must not replace the request they refer to.
+                if not text.startswith('Danbooru HTTP '):
+                    phase = text
+                self.events.put(('character_status', text))
+                self.events.put(('log', text))
             try:
-                results = discover(options, PROJECT_DIR, self.discovery_cancel,
-                                   lambda text: self.events.put(('character_status', text)))
+                with request_context(self.discovery_cancel, report):
+                    results = discover(options, PROJECT_DIR, self.discovery_cancel, report)
                 if results is not None and not self.discovery_cancel.is_set():
                     self.events.put(('characters', (results, options.source)))
                 else:
                     self.events.put(('character_status', 'Search cancelled; queue unchanged.'))
             except Exception as error:
-                message = str(error) if isinstance(error, DatasetCountError) else failure_reason(error)
-                self.events.put(('character_status', 'Search failed; queue unchanged. ' + message))
+                if self.discovery_cancel.is_set():
+                    self.events.put(('character_status', 'Search cancelled; queue unchanged.'))
+                else:
+                    message = str(error) if isinstance(error, DatasetCountError) else failure_reason(error)
+                    message = f'Search failed; queue unchanged. {message} Last step: {phase}'
+                    self.events.put(('character_status', message))
+                    self.events.put(('log', message))
             finally:
                 self.events.put(('character_finished', None))
         try:
@@ -764,12 +799,14 @@ class DownloaderGUI:
                 self.events.put(("log", f"Row {index}: {job.source} — {job.tags}"))
                 self.events.put(('row_status', (index, 'Running')))
                 try:
-                    counts = run_job(job, images, done, known, self.cancel,
-                                     lambda count, stats: self.events.put(('row_progress', (index, count, stats['downloaded']))),
-                                     log=lambda message: self.events.put(("log", f"Row {index}: {message}")),
-                                     on_download=received if self.caption_batches else None,
-                                     destination=destination if self.caption_batches else None,
-                                     **({'gap_progress': gap_progress} if track_gap else {}))
+                    row_log = lambda message: self.events.put(('log', f'Row {index}: {message}'))
+                    with request_context(self.cancel, row_log):
+                        counts = run_job(job, images, done, known, self.cancel,
+                                         lambda count, stats: self.events.put(('row_progress', (index, count, stats['downloaded']))),
+                                         log=row_log,
+                                         on_download=received if self.caption_batches else None,
+                                         destination=destination if self.caption_batches else None,
+                                         **({'gap_progress': gap_progress} if track_gap else {}))
                     self.events.put(("log", f"Row {index}: " + ", ".join(f"{value} {key}" for key, value in counts.items())))
                     had_errors = had_errors or bool(counts["failed"])
                     state = 'Stopped' if self.cancel.is_set() else 'Finished with errors' if counts['failed'] else 'Finished'
@@ -783,6 +820,9 @@ class DownloaderGUI:
                     if isinstance(error, caption_queue.QueueSubmissionError):
                         self.events.put(("log", "Downloads stopped because the caption queue could not be saved. "
                                          "Check disk space and folder permissions before starting again."))
+                        break
+                    if self.cancel.is_set():
+                        self.events.put(('log', f'Row {index}: stopped by user.'))
                         break
                     # Network errors may include authenticated URLs. Never log them.
                     self.events.put(("log", f"Row {index} failed: {failure_reason(error)}"))
@@ -811,6 +851,7 @@ class DownloaderGUI:
 
     def poll(self):
         self.poll_job = None
+        checkpoint_rows = False
         try:
             # Bound each batch so log traffic cannot starve Stop or window events.
             for _ in range(200):
@@ -826,6 +867,8 @@ class DownloaderGUI:
                     if 0 < index <= len(identifiers):
                         identifier = identifiers[index - 1]
                         self.set_row_status(identifier, text)
+                        if kind == 'row_status' and not text.startswith('Running'):
+                            checkpoint_rows = True
                         if text == 'Running' and not self.closing:
                             self.table.see(identifier)
                     continue
@@ -866,8 +909,13 @@ class DownloaderGUI:
                     self.stop_button.configure(state="disabled")
                     self.set_row_controls(True)
                     self.save_settings()
+                    checkpoint_rows = False
         except queue.Empty:
             pass
+        if checkpoint_rows:
+            # Persist completed rows while later rows are still downloading.
+            # Coalesce the batch instead of writing on every progress update.
+            self.save_settings()
         self.poll_job = self.root.after(25 if not self.events.empty() else 100, self.poll)
 
     def close(self):

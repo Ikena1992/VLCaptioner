@@ -59,7 +59,25 @@ def dataset_snapshot(dataset):
     snapshot = {tag: len(ids) for tag, ids in memberships.items()}
     snapshot.update({(tag, rating): len(ids & rated) for tag, ids in memberships.items()
                      for rating, rated in rating_ids.items()})
+    official = memberships.get('official art', set())
+    snapshot.update({(tag, 'official_art'): len(ids & official) for tag, ids in memberships.items()})
+    snapshot.update({(tag, 'official_art', rating): len(ids & official & rated)
+                     for tag, ids in memberships.items() for rating, rated in rating_ids.items()})
     return snapshot
+
+
+def query_official_art(query):
+    return 'official_art' in query.casefold().split()
+
+
+def target_key(tag, query):
+    from dataset_manager import normalize
+    parts = [normalize(tag)]
+    if query_official_art(query):
+        parts.append('official_art')
+    if rating := query_rating(query):
+        parts.append(rating)
+    return tuple(parts) if len(parts) > 1 else parts[0]
 
 
 class DatasetCountError(RuntimeError):
@@ -81,15 +99,17 @@ def parse_blacklist(text):
 
 
 def gap_tag(source, query):
-    """Extract one dataset tag, allowing score sorting and one score filter."""
+    """Extract one dataset tag, optionally restricted to official art and rating."""
     modifier = 'order:score' if source == 'Danbooru' else 'sort:score'
     tokens = [tag for tag in query.split() if tag.casefold() != modifier]
     query_rating(query)
     tokens = [tag for tag in tokens if not tag.lower().startswith('rating:')]
     scores = [tag for tag in tokens if SCORE_FILTER.fullmatch(tag)]
     tags = [tag for tag in tokens if not SCORE_FILTER.fullmatch(tag)]
+    if len(tags) > 1 and sum(tag.casefold() == 'official_art' for tag in tags) == 1:
+        tags = [tag for tag in tags if tag.casefold() != 'official_art']
     if len(scores) > 1 or len(tags) != 1 or tags[0].startswith('-') or tags[0].casefold().startswith(('order:', 'sort:', 'score:')):
-        raise ValueError('Gap filling requires one positive tag, optionally sorted by score with one score filter')
+        raise ValueError('Gap filling requires one positive tag, optionally with official_art, a rating, score sorting and one score filter')
     return tags[0]
 
 
@@ -108,6 +128,12 @@ def failure_reason(error):
         return "Request timed out; check connectivity or try again."
     if isinstance(error, requests.HTTPError):
         code = error.response.status_code if error.response is not None else "unknown"
+        if code == 429:
+            return 'HTTP 429: rate limit reached. Wait before retrying.'
+        if isinstance(code, int) and 500 <= code <= 599:
+            return f'HTTP {code}: the site returned a server error. Try again later; this does not confirm a rate limit.'
+        if code in (401, 403):
+            return f'HTTP {code}: access denied; check credentials and account permissions.'
         return f"HTTP {code}; check site access, credentials, or rate limits."
     if isinstance(error, requests.RequestException):
         return "Network request failed; check connectivity."
@@ -323,8 +349,7 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
         tag = gap_tag(job.source, job.tags)
         if job.target_count < 1:
             raise ValueError("Gap filling requires one positive tag and a positive dataset target")
-        rating = query_rating(job.tags)
-        key = (normalize(tag), rating) if rating else normalize(tag)
+        key = target_key(tag, job.tags)
         current = gap_progress[snapshot_key].get(key, 0)
         downloaded_earlier = progress.get(key, 0)
         gap = max(0, job.target_count - current - downloaded_earlier)
@@ -364,6 +389,9 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
                 if requested_rating and actual_rating != requested_rating:
                     post_log('Skipped: post rating does not match the requested rating.')
                     result = 'unavailable'
+                elif query_official_art(job.tags) and 'official_art' not in unescape(str(post.get('tag_string', post.get('tags', '')))).casefold().split():
+                    post_log('Skipped: post is missing official_art.')
+                    result = 'unavailable'
                 elif matches:
                     post_log("Skipped: blacklist matched " + ", ".join(matches))
                     result = "blacklisted"
@@ -377,8 +405,11 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
                     post_tags = str(post.get('tag_string', post.get('tags', '')))
                     downloaded_tags = {normalize(value) for value in unescape(post_tags).split()}
                     post_rating = RATINGS.get(str(post.get('rating', '')).lower())
+                    if 'official art' in downloaded_tags:
+                        downloaded_tags.update({(tag, 'official_art') for tag in list(downloaded_tags)})
                     if post_rating:
-                        downloaded_tags.update({(tag, post_rating) for tag in list(downloaded_tags)})
+                        downloaded_tags.update({(*tag, post_rating) if isinstance(tag, tuple) else (tag, post_rating)
+                                                for tag in list(downloaded_tags)})
                     if job.target_count is not None:
                         downloaded_tags.add(key)
                     for downloaded_tag in downloaded_tags:

@@ -6,6 +6,8 @@ import requests
 import time
 import math
 from threading import Lock
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from runtime_config import CONFIG_FILE, read_settings
 
@@ -14,6 +16,28 @@ DEFAULT_REQUEST_INTERVAL_SECONDS = 0.35
 DEFAULT_RATE_LIMIT_RETRIES = 4
 _request_lock = Lock()
 _last_request_time = 0.0
+_request_context = ContextVar('danbooru_request_context', default=(None, None))
+RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+
+
+class RequestCancelled(requests.RequestException):
+    """An API operation was cancelled before its next request."""
+
+
+@contextmanager
+def request_context(cancel_event=None, on_retry=None):
+    token = _request_context.set((cancel_event, on_retry))
+    try:
+        yield
+    finally:
+        _request_context.reset(token)
+
+
+def _wait(seconds, cancel_event):
+    if cancel_event is None:
+        time.sleep(seconds)
+    elif cancel_event.wait(seconds):
+        raise RequestCancelled('Danbooru request cancelled')
 
 
 def read_danbooru_config() -> dict[str, str]:
@@ -64,12 +88,15 @@ def danbooru_get(url: str, **kwargs) -> requests.Response:
     global _last_request_time
     retries = kwargs.pop("rate_limit_retries", DEFAULT_RATE_LIMIT_RETRIES)
     interval = kwargs.pop("request_interval", DEFAULT_REQUEST_INTERVAL_SECONDS)
+    cancel_event, on_retry = _request_context.get()
 
     for attempt in range(retries + 1):
         with _request_lock:
+            if cancel_event is not None and cancel_event.is_set():
+                raise RequestCancelled('Danbooru request cancelled')
             delay = interval - (time.monotonic() - _last_request_time)
             if delay > 0:
-                time.sleep(delay)
+                _wait(delay, cancel_event)
             response = requests.get(
                 url,
                 auth=get_danbooru_auth(),
@@ -78,7 +105,7 @@ def danbooru_get(url: str, **kwargs) -> requests.Response:
             )
             _last_request_time = time.monotonic()
 
-        if response.status_code != 429 or attempt >= retries:
+        if response.status_code not in RETRYABLE_STATUSES or attempt >= retries:
             return response
 
         retry_after = response.headers.get("Retry-After", "")
@@ -90,6 +117,9 @@ def danbooru_get(url: str, **kwargs) -> requests.Response:
         except (TypeError, ValueError):
             retry_delay = 2 ** (attempt + 1)
         response.close()
-        time.sleep(retry_delay)
+        if on_retry is not None:
+            kind = 'rate limit' if response.status_code == 429 else 'temporary server error'
+            on_retry(f'Danbooru HTTP {response.status_code} ({kind}); retry {attempt + 1}/{retries} in {retry_delay:g}s…')
+        _wait(retry_delay, cancel_event)
 
     return response

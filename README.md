@@ -232,6 +232,11 @@ created on or after a date (UTC). Set the minimum total Danbooru post count,
 the target images per character for **General**, **Sensitive**, **Questionable**,
 and **Explicit**, and either **Absent only** or **Below target**. A target of `0`
 skips that rating. Discovery adds separate rows for every underfilled rating.
+The optional **Add official art row** setting (off by default, target `10`) adds one Danbooru
+row per underfilled character with `official_art` and no rating restriction,
+regardless of the selected download sources. Only images tagged with both the
+character and `official_art` count toward this target; these images can also count
+toward their rating targets. This row sorts by score without applying the minimum score filter.
 Each rating is counted independently using the dataset's safety tags: `safe`,
 `sensitive`, `nsfw` without `explicit`, and `explicit`, respectively. Images
 without safety tags do not count toward a rating target.
@@ -241,7 +246,7 @@ restrictive recorded rating (Explicit, Questionable, Sensitive, then General).
 the character is entirely absent; **Below target** also fills missing ratings
 for characters already in the dataset.
 Enter an optional **Minimum score** number: `5` adds `score:>=5` to every generated
-search. Leave it blank for no score restriction. It filters downloads; the
+rating search. Leave it blank for no score restriction. It filters downloads; the
 minimum post count and existing dataset count still consider all images.
 Counts use unique MD5 images in `images/` and `done/`, including queued batches.
 Source `.txt` files provide matching tags; if missing or empty, target counting uses the
@@ -258,6 +263,22 @@ and **Export last results as JSON** saves the eligible character list.
 for example `classic_sombra, beauty\_(nikke)`.
 Tag creation dates describe when the tag was added to Danbooru, not when a
 character debuted or when its first image was posted.
+Danbooru requests retry temporary HTTP 429, 500, 502, 503, and 504 responses
+up to four times with increasing waits. Discovery displays retry progress;
+Cancel interrupts the waiting period. Persistent discovery errors leave the
+search queue unchanged. The activity log preserves discovery steps and retries;
+failures name the last step to help identify the affected request.
+The oldest-image check requests the lowest-ID matching post using
+`order:id_asc limit:1` and checks its creation date. It includes deleted records
+when accessible, without sorting by creation date or scanning every matching post.
+HTTP 500 indicates a server error; HTTP 429 indicates
+a rate-limit response.
+Optionally set **Oldest image on/after** as a second, independent date filter.
+The earliest accessible Danbooru post must fall between that date and today,
+inclusive (UTC). Leave it blank to disable. The age lookup ignores download score,
+rating, and blacklist filters and includes deleted records when the API exposes
+them. Inaccessible posts can make this check incomplete. Candidates without an
+accessible post are skipped when the filter is enabled.
 Character discovery always checks tag name/category history. It checks the earliest available version for the tag ID and skips
 only history strictly before the cutoff; changes within the date range remain
 eligible. Missing history does not exclude a tag. This adds an API lookup per
