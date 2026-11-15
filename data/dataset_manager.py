@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from tkinter import filedialog, messagebox
 import ttkbootstrap as ttk
+from ui_widgets import disable_scroll_changes
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT
@@ -245,6 +246,7 @@ class DatasetManager(ttk.Frame):
             group.grid(row=0, column=column, padx=5, sticky='ew')
             ttk.Label(group, text='Category' if column == 2 else 'Count scope', bootstyle='secondary').pack(anchor='w')
             combo = ttk.Combobox(group, textvariable=var, values=choices, state='readonly', width=22)
+            disable_scroll_changes(combo)
             combo.pack(fill='x')
             if column == 3:
                 self.scope_combo = combo

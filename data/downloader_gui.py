@@ -21,6 +21,7 @@ from runtime_config import PROJECT_DIR
 import caption_queue
 from character_discovery import CharacterOptions, discover, search_rows, character_tags_text
 from danbooru_client import request_context
+from ui_widgets import disable_scroll_changes
 
 SETTINGS_FILE = PROJECT_DIR / "data" / "caches" / "downloader_settings.json"
 
@@ -160,6 +161,7 @@ class DownloaderGUI:
             widget.bind('<Tab>', lambda event: self.next_edit_cell(1))
             widget.bind('<Shift-Tab>', lambda event: self.next_edit_cell(-1))
             widget.bind('<FocusOut>', self.finish_unfocused_cell)
+        disable_scroll_changes(self.editor_widgets[0])
         self.editor_widgets[0].bind('<<ComboboxSelected>>', lambda event: self.finish_cell_edit())
         self.editor_hint = tk.StringVar(value="Select one search to edit. Changes are saved immediately to the row.")
         ttk.Label(search_page, textvariable=self.editor_hint, bootstyle="secondary", wraplength=800).pack(anchor='w', pady=(8, 0))
@@ -246,6 +248,8 @@ class DownloaderGUI:
             widget = (ttk.Combobox(fields, textvariable=self.character_fields[key], values=choices, state='readonly')
                       if choices else ttk.Entry(fields, textvariable=self.character_fields[key]))
             widget.grid(row=index, column=1, sticky='ew', pady=6)
+            if choices:
+                disable_scroll_changes(widget)
             self.character_widgets.append(widget)
         fields.columnconfigure(1, weight=1)
         ttk.Checkbutton(page, text='Exclude likely outfit/variant tags (character implications)',
