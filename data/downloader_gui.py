@@ -10,6 +10,10 @@ from tkinter import messagebox, scrolledtext, filedialog
 from tkinter import font as tkfont
 
 import ttkbootstrap as ttk
+try:
+    from ttkbootstrap.widgets.scrolled import ScrolledFrame
+except ImportError:
+    from ttkbootstrap.scrolled import ScrolledFrame
 
 from booru_downloader import DatasetCountError, DownloadJob, ImageIndex, failure_reason, gap_tag, parse_blacklist, run_job, query_rating, SCORE_FILTER
 from runtime_config import PROJECT_DIR
@@ -213,8 +217,10 @@ class DownloaderGUI:
         self.poll_job = root.after(100, self.poll)
 
     def build_character_tab(self, notebook):
-        page = ttk.Frame(notebook, padding=16)
-        notebook.add(page, text='Missing characters')
+        tab = ttk.Frame(notebook, padding=8)
+        notebook.add(tab, text='Missing characters')
+        page = ScrolledFrame(tab, autohide=True, height=360, padding=8)
+        page.pack(fill='both', expand=True)
         ttk.Label(page, text='Find new character tags', font=('Segoe UI', 16, 'bold')).pack(anchor='w')
         ttk.Label(page, text='Discover Danbooru character tags created on or after the date (UTC). '
                   'Compare unique images in images/ and done/. Add searches without starting downloads.',
@@ -223,7 +229,7 @@ class DownloaderGUI:
         fields.pack(fill='x')
         defaults = {'since': '2025-01-01', 'min_posts': '100',
                     'source': 'Both', 'scope': 'Below target', 'score_filter': '',
-                    'rating_g': '50', 'rating_s': '50', 'rating_q': '50', 'rating_e': '50'}
+                    'rating_g': '50', 'rating_s': '50', 'rating_q': '50', 'rating_e': '50', 'exclude_variants': 'no'}
         self.character_fields = {key: tk.StringVar(value=value) for key, value in defaults.items()}
         self.character_widgets = []
         for index, (key, title, choices) in enumerate((
@@ -238,6 +244,12 @@ class DownloaderGUI:
             widget.grid(row=index, column=1, sticky='ew', pady=6)
             self.character_widgets.append(widget)
         fields.columnconfigure(1, weight=1)
+        ttk.Checkbutton(page, text='Exclude likely outfit/variant tags (character implications)',
+                        variable=self.character_fields['exclude_variants'], onvalue='yes', offvalue='no').pack(anchor='w', pady=(8, 0))
+        ttk.Label(page, text='Not definitive: implications can be missing, so variants may still appear. '
+                  'Character parents can also be umbrella identities, so valid main tags may be excluded. '
+                  'This only skips tags with an active implication to another Character tag.',
+                  wraplength=780, bootstyle='warning').pack(anchor='w', pady=(4, 0))
         ratings = ttk.Labelframe(page, text='Target images per character and rating (0 skips that rating)', padding=8)
         ratings.pack(fill='x', pady=(10, 0))
         for index, (rating, label) in enumerate(zip('gsqe', ('General', 'Sensitive', 'Questionable', 'Explicit'))):
@@ -271,7 +283,8 @@ class DownloaderGUI:
             values = {key: value.get().strip() for key, value in self.character_fields.items()}
             options = CharacterOptions(values['since'], int(values['min_posts']), sum(int(values[f'rating_{r}']) for r in 'gsqe'),
                                        values['source'], values['scope'], minimum_score_filter(values['score_filter']),
-                                       tuple(int(values[f'rating_{r}']) for r in 'gsqe'))
+                                       tuple(int(values[f'rating_{r}']) for r in 'gsqe'),
+                                       exclude_variants=values['exclude_variants'] == 'yes')
         except (ValueError, TypeError):
             messagebox.showerror('Missing characters', 'Enter a valid YYYY-MM-DD date, positive minimum posts, nonnegative rating targets (at least one above zero), and an optional whole-number minimum score such as 5.', parent=self.root)
             return

@@ -262,6 +262,13 @@ Character discovery always checks tag name/category history. It checks the earli
 only history strictly before the cutoff; changes within the date range remain
 eligible. Missing history does not exclude a tag. This adds an API lookup per
 eligible candidate and does not trace aliases to separate replacement tag IDs.
+Optionally enable **Exclude likely outfit/variant tags (character implications)**.
+It skips a candidate only when an active implication points to another tag
+verified as Character category. This is not definitive: missing implications can
+let variants through, and umbrella character identities can cause false exclusions.
+No implication does not prove that a tag is a main character tag. The option is
+off by default and its setting is saved. It affects future discovery results,
+not searches already in the queue.
 
 Enable **Caption automatically** to process downloads in batches (default: 50)
 while downloading continues. Manage batches in the captioner's **Queue** tab.

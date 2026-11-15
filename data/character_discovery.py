@@ -15,6 +15,7 @@ class CharacterOptions:
     scope: str = 'Below target'
     score_filter: str = ''
     rating_targets: tuple | None = None
+    exclude_variants: bool = False
 
     def __post_init__(self):
         if date.fromisoformat(self.since).isoformat() != self.since:
@@ -28,6 +29,58 @@ class CharacterOptions:
         if self.rating_targets is not None and (len(self.rating_targets) != 4 or
                 any(type(n) is not int or n < 0 for n in self.rating_targets) or not any(self.rating_targets)):
             raise ValueError('Set a nonnegative target for each rating, with at least one above zero.')
+        if type(self.exclude_variants) is not bool:
+            raise ValueError('Variant exclusion must be enabled or disabled.')
+
+
+def character_parent(name, cancel, categories):
+    """Find an active direct implication to another verified Character tag.
+
+    None means no evidence found, not proof that this is a main character tag.
+    Category lookups are shared within one discovery run, never across runs.
+    """
+    cursor = None
+    while not cancel.is_set():
+        params = {'search[antecedent_name]': name, 'search[status]': 'active', 'limit': 100}
+        if cursor is not None:
+            params['page'] = f'b{cursor}'
+        with danbooru_get('https://danbooru.donmai.us/tag_implications.json', params=params, timeout=30) as response:
+            response.raise_for_status()
+            relations = response.json()
+        if cancel.is_set():
+            return None
+        if not isinstance(relations, list) or any(not isinstance(r, dict) for r in relations):
+            raise ValueError('Unexpected tag implication response.')
+        if not relations:
+            return None
+        ids = []
+        for relation in relations:
+            if cancel.is_set():
+                return None
+            identifier = relation.get('id')
+            if type(identifier) is not int or identifier < 1 or (cursor is not None and identifier >= cursor):
+                raise ValueError('Tag implication pagination did not advance.')
+            ids.append(identifier)
+            if relation.get('antecedent_name') != name or relation.get('status') != 'active':
+                continue
+            parent = relation.get('consequent_name')
+            if not isinstance(parent, str) or not parent or parent == name:
+                continue
+            if parent not in categories:
+                with danbooru_get('https://danbooru.donmai.us/tags.json',
+                                  params={'search[name]': parent, 'limit': 1}, timeout=30) as response:
+                    response.raise_for_status()
+                    tags = response.json()
+                if cancel.is_set():
+                    return None
+                if not isinstance(tags, list) or any(not isinstance(t, dict) for t in tags):
+                    raise ValueError('Unexpected parent tag response.')
+                match = next((t for t in tags if t.get('name') == parent), None)
+                categories[parent] = match.get('category') if match else None
+            if categories[parent] == 4:
+                return parent
+        cursor = min(ids)
+    return None
 
 
 def earliest_tag_history(tag_id):
@@ -78,6 +131,7 @@ def discover(options, root, cancel, log=lambda text: None):
     # Don't read the entire local dataset until a qualifying remote tag exists.
     counts = None
     results, seen = [], set()
+    parent_categories = {}
     cursor = None
     page = 0
     cutoff = datetime.combine(date.fromisoformat(options.since), datetime.min.time(), timezone.utc)
@@ -143,6 +197,14 @@ def discover(options, root, cancel, log=lambda text: None):
                 continue
             if earliest is None:
                 log(f'{name}: no tag history available; keeping the candidate.')
+            if options.exclude_variants:
+                log(f'Danbooru API: checking character implications for {name}…')
+                parent = character_parent(name, cancel, parent_categories)
+                if cancel.is_set():
+                    return None
+                if parent:
+                    log(f'Skipped likely variant {name}: implies character tag {parent}.')
+                    continue
             results.append({'name': name, 'post_count': int(tag['post_count']),
                             'created_at': tag['created_at'], 'local_count': current,
                             'target': options.target, 'score_filter': options.score_filter,
