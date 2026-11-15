@@ -6,16 +6,28 @@ from file_io import atomic_write_json
 import threading
 import uuid
 import tkinter as tk
-from tkinter import messagebox, scrolledtext
+from tkinter import messagebox, scrolledtext, filedialog
 from tkinter import font as tkfont
 
 import ttkbootstrap as ttk
 
-from booru_downloader import DatasetCountError, DownloadJob, ImageIndex, failure_reason, gap_tag, parse_blacklist, run_job
+from booru_downloader import DatasetCountError, DownloadJob, ImageIndex, failure_reason, gap_tag, parse_blacklist, run_job, query_rating, SCORE_FILTER
 from runtime_config import PROJECT_DIR
 import caption_queue
+from character_discovery import CharacterOptions, discover, search_rows
 
 SETTINGS_FILE = PROJECT_DIR / "data" / "caches" / "downloader_settings.json"
+
+
+def search_identity(row):
+    """Compare equivalent single-character searches regardless of token order."""
+    source, query = row['source'], row['tags']
+    try:
+        tag = gap_tag(source, query).casefold()
+        score = tuple(sorted(token.casefold() for token in query.split() if SCORE_FILTER.fullmatch(token)))
+        return source, tag, query_rating(query), score
+    except ValueError:
+        return source, ' '.join(query.casefold().split())
 
 
 def download_job_from_row(row, blacklist):
@@ -56,6 +68,9 @@ class DownloaderGUI:
         self.closing = False
         self.poll_job = None
         self.close_job = None
+        self.discovery_running = False
+        self.discovery_cancel = threading.Event()
+        self.character_results = []
         root.title("VLCaptioner — Image downloader")
         root.geometry("1040x820")
         root.minsize(860, 680)
@@ -76,6 +91,7 @@ class DownloaderGUI:
         self.search_notebook = notebook
         self.search_page = search_page
         self.settings_page = settings_page
+        self.build_character_tab(notebook)
 
         row_tools = ttk.Frame(search_page)
         row_tools.pack(fill="x", pady=(0, 8))
@@ -181,6 +197,138 @@ class DownloaderGUI:
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.poll_job = root.after(100, self.poll)
 
+    def build_character_tab(self, notebook):
+        page = ttk.Frame(notebook, padding=16)
+        notebook.add(page, text='Missing characters')
+        ttk.Label(page, text='Find new character tags', font=('Segoe UI', 16, 'bold')).pack(anchor='w')
+        ttk.Label(page, text='Discover Danbooru character tags created on or after the date (UTC). '
+                  'Compare unique images in done/ and done1/. Add searches without starting downloads.',
+                  wraplength=780).pack(anchor='w', pady=(8, 16))
+        fields = ttk.Frame(page)
+        fields.pack(fill='x')
+        defaults = {'since': '2025-01-01', 'min_posts': '100',
+                    'source': 'Both', 'scope': 'Below target', 'score_filter': '',
+                    'rating_g': '50', 'rating_s': '50', 'rating_q': '50', 'rating_e': '50'}
+        self.character_fields = {key: tk.StringVar(value=value) for key, value in defaults.items()}
+        self.character_widgets = []
+        for index, (key, title, choices) in enumerate((
+                ('since', 'Tag created on/after (YYYY-MM-DD)', None),
+                ('min_posts', 'Minimum posts on Danbooru', None),
+                ('score_filter', 'Score filter (optional, e.g. score:>=10)', None),
+                ('source', 'Queue download sources', ('Danbooru', 'Gelbooru', 'Both')),
+                ('scope', 'Characters to include', ('Absent only', 'Below target')))):
+            ttk.Label(fields, text=title).grid(row=index, column=0, sticky='w', pady=6, padx=(0, 18))
+            widget = (ttk.Combobox(fields, textvariable=self.character_fields[key], values=choices, state='readonly')
+                      if choices else ttk.Entry(fields, textvariable=self.character_fields[key]))
+            widget.grid(row=index, column=1, sticky='ew', pady=6)
+            self.character_widgets.append(widget)
+        fields.columnconfigure(1, weight=1)
+        ratings = ttk.Labelframe(page, text='Target images per character and rating (0 skips that rating)', padding=8)
+        ratings.pack(fill='x', pady=(10, 0))
+        for index, (rating, label) in enumerate(zip('gsqe', ('General', 'Sensitive', 'Questionable', 'Explicit'))):
+            ttk.Label(ratings, text=label).grid(row=0, column=index, sticky='w', padx=6)
+            widget = ttk.Entry(ratings, textvariable=self.character_fields[f'rating_{rating}'], width=10)
+            widget.grid(row=1, column=index, sticky='ew', padx=6)
+            ratings.columnconfigure(index, weight=1)
+            self.character_widgets.append(widget)
+        ttk.Label(page, text='Minimum posts measures total Danbooru availability, before blacklist filtering. '
+                  'Below target includes partially filled characters. Both sources share the same total target; '
+                  'Gelbooru fills any gap left by Danbooru. Score filters restrict downloads, not the total post-count threshold '
+                  'or existing dataset counts. Enable automatic captioning to move downloads into done/.',
+                  wraplength=780, bootstyle='secondary').pack(anchor='w', pady=16)
+        actions = ttk.Frame(page)
+        actions.pack(fill='x')
+        self.discover_button = ttk.Button(actions, text='Find and add missing characters', command=self.start_discovery)
+        self.discover_button.pack(side='left')
+        self.discovery_stop = ttk.Button(actions, text='Cancel search', command=self.discovery_cancel.set, state='disabled')
+        self.discovery_stop.pack(side='left', padx=8)
+        ttk.Button(actions, text='Export last results as JSON', command=self.export_characters).pack(side='left')
+        self.discovery_status = tk.StringVar(value='Ready. Existing queue rows are kept; duplicate searches are skipped.')
+        ttk.Label(page, textvariable=self.discovery_status, wraplength=780).pack(anchor='w', pady=16)
+
+    def start_discovery(self):
+        if self.running or self.discovery_running or self.closing:
+            return
+        try:
+            values = {key: value.get().strip() for key, value in self.character_fields.items()}
+            options = CharacterOptions(values['since'], int(values['min_posts']), sum(int(values[f'rating_{r}']) for r in 'gsqe'),
+                                       values['source'], values['scope'], values['score_filter'],
+                                       tuple(int(values[f'rating_{r}']) for r in 'gsqe'))
+        except (ValueError, TypeError):
+            messagebox.showerror('Missing characters', 'Enter a valid YYYY-MM-DD date, positive minimum posts, nonnegative rating targets (at least one above zero), and an optional score filter such as score:>=10.', parent=self.root)
+            return
+        self.save_settings()
+        self.discovery_cancel.clear()
+        self.discovery_running = True
+        self.discover_button.configure(state='disabled')
+        self.discovery_stop.configure(state='normal')
+        self.start_button.configure(state='disabled')
+        self.discovery_status.set('Scanning local dataset and searching Danbooru…')
+        def work():
+            try:
+                results = discover(options, PROJECT_DIR, self.discovery_cancel,
+                                   lambda text: self.events.put(('character_status', text)))
+                if results is not None and not self.discovery_cancel.is_set():
+                    self.events.put(('characters', (results, options.source)))
+                else:
+                    self.events.put(('character_status', 'Search cancelled; queue unchanged.'))
+            except Exception as error:
+                message = str(error) if isinstance(error, DatasetCountError) else failure_reason(error)
+                self.events.put(('character_status', 'Search failed; queue unchanged. ' + message))
+            finally:
+                self.events.put(('character_finished', None))
+        try:
+            threading.Thread(target=work, daemon=True).start()
+        except RuntimeError:
+            self.events.put(('character_status', 'Could not start character search.'))
+            self.events.put(('character_finished', None))
+
+    def add_character_results(self, results, source):
+        if self.closing or self.discovery_cancel.is_set():
+            return
+        self.character_results = results
+        existing = {search_identity(row): identifier for identifier, row in self.rows.items()}
+        blank_rows = iter(identifier for identifier, row in self.rows.items() if not row['tags'].strip())
+        added = updated = 0
+        for row in search_rows(results, source):
+            key = search_identity(row)
+            if key in existing:
+                identifier = existing[key]
+                previous = self.rows[identifier]
+                # Refresh targets of searches owned by this feature, while
+                # preserving manually entered rows and their custom targets.
+                if previous.get('character_generated') and previous['target'] != row['target']:
+                    previous['target'] = row['target']
+                    self.table.item(identifier, values=tuple(previous[k] for k in ('source', 'tags', 'limit', 'target')))
+                    updated += 1
+                continue
+            blank = next(blank_rows, None)
+            if blank is None:
+                identifier = self.add_row(row['source'], row['tags'], row['limit'], row['target'])
+            else:
+                identifier = blank
+                self.rows[blank] = row
+                self.table.item(blank, values=tuple(row[k] for k in ('source', 'tags', 'limit', 'target')))
+            self.rows[identifier]['character_generated'] = True
+            existing[key] = identifier
+            added += 1
+        self.update_row_count()
+        self.select_row()
+        self.save_settings()
+        self.discovery_status.set(f'{len(results):,} eligible characters; added {added:,} searches, updated {updated:,} targets. Review Search queue, then start downloads.')
+
+    def export_characters(self):
+        if not self.character_results:
+            messagebox.showinfo('Missing characters', 'Complete a character search first.', parent=self.root)
+            return
+        filename = filedialog.asksaveasfilename(parent=self.root, defaultextension='.json',
+                                              filetypes=[('JSON', '*.json')], initialfile='missing_characters.json')
+        if filename:
+            try:
+                atomic_write_json(Path(filename), self.character_results, ensure_ascii=False, indent=2, trailing_newline=True)
+            except OSError:
+                messagebox.showerror('Missing characters', 'Could not save the JSON file.', parent=self.root)
+
     def update_batch_controls(self):
         self.batch_entry.configure(state="normal" if self.auto_caption.get() and not self.running else "disabled")
 
@@ -214,13 +362,21 @@ class DownloaderGUI:
         self.auto_caption.set(bool(settings.get("auto_caption", False)))
         self.batch_size.set(str(settings.get("batch_size", "50")))
         self.blacklist.set(blacklist)
+        saved_characters = settings.get('character_discovery', {})
+        if isinstance(saved_characters, dict):
+            for key, variable in self.character_fields.items():
+                if isinstance(saved_characters.get(key), str):
+                    variable.set(saved_characters[key])
         for row in rows:
             identifier = self.add_row(row["source"], row["tags"], row["limit"], str(row.get("target", "")))
             if isinstance(row.get('gap_group'), str):
                 self.rows[identifier]['gap_group'] = row['gap_group']
+            if row.get('character_generated') is True:
+                self.rows[identifier]['character_generated'] = True
 
     def save_settings(self):
         settings = {"auto_caption": self.auto_caption.get(), "batch_size": self.batch_size.get(), "blacklist_separator": "spaces", "blacklist": self.blacklist.get(), "rows": list(self.rows.values())}
+        settings['character_discovery'] = {key: value.get() for key, value in self.character_fields.items()}
         try:
             self.settings_file.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_json(self.settings_file, settings, ensure_ascii=False, indent=2,
@@ -300,6 +456,7 @@ class DownloaderGUI:
         if len(selected) != 1 or selected[0] not in self.rows:
             return
         row = self.rows[selected[0]]
+        row.pop('character_generated', None)
         row.update(source=self.edit_source.get(), tags=self.edit_tags.get(), limit=self.edit_limit.get(), target=self.edit_target.get())
         self.table.item(selected[0], values=(row["source"], row["tags"], row["limit"], row["target"]))
         self.editor_hint.set("Target mode: post limit is ignored. Counts completed images in done/ and done1/." if row["target"].strip() else
@@ -328,7 +485,7 @@ class DownloaderGUI:
             widget.configure(state=("readonly" if index == 0 else "normal") if active else "disabled")
 
     def start(self):
-        if self.running or self.closing:
+        if self.running or self.discovery_running or self.closing:
             return
         if not self.can_start(self.auto_caption.get()):
             self.status.set("Wait for captioning or copy / move to finish before downloading.")
@@ -382,6 +539,7 @@ class DownloaderGUI:
         batch_id = None
         batch_count = 0
         batch_handle = None
+        batch_folder = None
         download_handle = None
         try:
             download_handle = caption_queue.downloader_lock()
@@ -409,13 +567,13 @@ class DownloaderGUI:
                     batch_count = 0
 
             def destination():
-                nonlocal batch_id, images, batch_handle
+                nonlocal batch_id, batch_folder, batch_handle
                 if batch_id is None:
                     try:
-                        batch_id, images, batch_handle = caption_queue.new_batch("Downloaded images", own_download=True)
+                        batch_id, batch_folder, batch_handle = caption_queue.new_batch("Downloaded images", own_download=True)
                     except (OSError, caption_queue.sqlite3.Error) as error:
                         raise caption_queue.QueueSubmissionError() from error
-                return images
+                return batch_folder
 
             gap_progress = {}
             track_gap = any(job.target_count is not None for job in jobs)
@@ -472,6 +630,19 @@ class DownloaderGUI:
             # Bound each batch so log traffic cannot starve Stop or window events.
             for _ in range(200):
                 kind, value = self.events.get_nowait()
+                if kind == 'character_status':
+                    self.discovery_status.set(value)
+                    continue
+                if kind == 'characters':
+                    self.add_character_results(*value)
+                    continue
+                if kind == 'character_finished':
+                    self.discovery_running = False
+                    self.discovery_stop.configure(state='disabled')
+                    self.discover_button.configure(state='normal')
+                    if not self.closing:
+                        self.start_button.configure(state='normal')
+                    continue
                 if kind == "log":
                     follow = self.log.yview()[1] >= 0.99
                     self.log.configure(state="normal")
@@ -509,8 +680,10 @@ class DownloaderGUI:
 
     def finish_close(self):
         self.close_job = None
-        if self.running:
-            self.stop()
+        if self.running or self.discovery_running:
+            if self.running:
+                self.stop()
+            self.discovery_cancel.set()
             self.close_job = self.root.after(100, self.finish_close)
         else:
             self.save_settings()

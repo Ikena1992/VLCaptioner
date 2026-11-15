@@ -21,6 +21,35 @@ from refresh_tags_from_danbooru import post_to_tags as danbooru_post_to_tags
 from fetch_danbooru_tags import save_tags
 
 MD5 = re.compile(r"^[0-9a-f]{32}$", re.I)
+SCORE_FILTER = re.compile(r'score:(?:>=|<=|>|<|=)?-?\d+', re.I)
+RATINGS = {'g': 'g', 'general': 'g', 's': 's', 'sensitive': 's', 'safe': 's',
+           'q': 'q', 'questionable': 'q', 'e': 'e', 'explicit': 'e'}
+
+
+def query_rating(query):
+    tokens = [token.lower()[7:] for token in query.split() if token.lower().startswith('rating:')]
+    if len(tokens) > 1 or (tokens and tokens[0] not in RATINGS):
+        raise ValueError('Use one rating:general, rating:sensitive, rating:questionable or rating:explicit filter.')
+    return RATINGS[tokens[0]] if tokens else None
+
+
+def dataset_snapshot(dataset):
+    """Count tag/rating intersections, deduplicating MD5s across folders."""
+    memberships = {}
+    for tag, paths in dataset.matches.items():
+        memberships[tag] = {('md5', p.stem.casefold()) if MD5.fullmatch(p.stem)
+                            else ('path', os.path.normcase(str(p.resolve()))) for p in paths}
+    rating_ids = {'g': set(memberships.get('safe', ())), 's': set(memberships.get('sensitive', ())),
+                  'e': set(memberships.get('explicit', ()))}
+    rating_ids['q'] = memberships.get('nsfw', set()) - rating_ids['e']
+    # A duplicate MD5 may carry stale, conflicting safety tags in done1/.
+    # Give the more restrictive rating precedence instead of filling two gaps.
+    rating_ids['s'] -= rating_ids['e'] | rating_ids['q']
+    rating_ids['g'] -= rating_ids['e'] | rating_ids['q'] | rating_ids['s']
+    snapshot = {tag: len(ids) for tag, ids in memberships.items()}
+    snapshot.update({(tag, rating): len(ids & rated) for tag, ids in memberships.items()
+                     for rating, rated in rating_ids.items()})
+    return snapshot
 
 
 class DatasetCountError(RuntimeError):
@@ -42,11 +71,15 @@ def parse_blacklist(text):
 
 
 def gap_tag(source, query):
-    """Extract one dataset tag, allowing the source's score sort modifier."""
+    """Extract one dataset tag, allowing score sorting and one score filter."""
     modifier = 'order:score' if source == 'Danbooru' else 'sort:score'
-    tags = [tag for tag in query.split() if tag.casefold() != modifier]
-    if len(tags) != 1 or tags[0].startswith('-') or tags[0].casefold().startswith(('order:', 'sort:')):
-        raise ValueError('Gap filling requires one positive tag, optionally sorted by score')
+    tokens = [tag for tag in query.split() if tag.casefold() != modifier]
+    query_rating(query)
+    tokens = [tag for tag in tokens if not tag.lower().startswith('rating:')]
+    scores = [tag for tag in tokens if SCORE_FILTER.fullmatch(tag)]
+    tags = [tag for tag in tokens if not SCORE_FILTER.fullmatch(tag)]
+    if len(scores) > 1 or len(tags) != 1 or tags[0].startswith('-') or tags[0].casefold().startswith(('order:', 'sort:', 'score:')):
+        raise ValueError('Gap filling requires one positive tag, optionally sorted by score with one score filter')
     return tags[0]
 
 
@@ -234,7 +267,7 @@ def save_original(post, source, images, done, known, cancel, log=lambda message:
                 known.add(md5)
                 return "skipped"
         known.add(md5)
-        log(f"Saved images/{target.name}; TXT/CSV tags ready (existing nonempty TXT preserved).")
+        log(f"Saved {target}; TXT/CSV tags ready (existing nonempty TXT preserved).")
         return "downloaded"
     except (requests.RequestException, OSError, RuntimeError, ValueError) as error:
         log(f"Failed during {stage}: {failure_reason(error)}")
@@ -250,6 +283,7 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
         raise ValueError("Tags and a positive post limit are required")
     images.mkdir(parents=True, exist_ok=True)
     counts = dict(downloaded=0, skipped=0, blacklisted=0, unavailable=0, failed=0)
+    requested_rating = query_rating(job.tags)
     gap = None
     progress = None
     if job.target_count is not None or gap_progress is not None:
@@ -265,12 +299,7 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
                 return counts
             if dataset.warnings:
                 raise DatasetCountError("Could not reliably count done/ and done1/. Check unreadable tag files and folder permissions.")
-            snapshot = {}
-            for dataset_tag, paths in dataset.matches.items():
-                identities = {('md5', path.stem.casefold()) if MD5.fullmatch(path.stem)
-                              else ('path', os.path.normcase(str(path.resolve())))
-                              for path in paths}
-                snapshot[dataset_tag] = len(identities)
+            snapshot = dataset_snapshot(dataset)
             gap_progress[snapshot_key] = snapshot
             gap_progress[downloaded_key] = {}
         progress = gap_progress[downloaded_key]
@@ -278,7 +307,8 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
         tag = gap_tag(job.source, job.tags)
         if job.target_count < 1:
             raise ValueError("Gap filling requires one positive tag and a positive dataset target")
-        key = normalize(tag)
+        rating = query_rating(job.tags)
+        key = (normalize(tag), rating) if rating else normalize(tag)
         current = gap_progress[snapshot_key].get(key, 0)
         downloaded_earlier = progress.get(key, 0)
         gap = max(0, job.target_count - current - downloaded_earlier)
@@ -314,7 +344,11 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
             post_log = lambda message: log(f"{label}: {message}")
             try:
                 matches = blacklist_matches(post, job.blacklist)
-                if matches:
+                actual_rating = RATINGS.get(str(post.get('rating', '')).lower())
+                if requested_rating and actual_rating != requested_rating:
+                    post_log('Skipped: post rating does not match the requested rating.')
+                    result = 'unavailable'
+                elif matches:
                     post_log("Skipped: blacklist matched " + ", ".join(matches))
                     result = "blacklisted"
                 else:
@@ -326,6 +360,9 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
                 if result == 'downloaded' and progress is not None:
                     post_tags = str(post.get('tag_string', post.get('tags', '')))
                     downloaded_tags = {normalize(value) for value in unescape(post_tags).split()}
+                    post_rating = RATINGS.get(str(post.get('rating', '')).lower())
+                    if post_rating:
+                        downloaded_tags.update({(tag, post_rating) for tag in list(downloaded_tags)})
                     if job.target_count is not None:
                         downloaded_tags.add(key)
                     for downloaded_tag in downloaded_tags:

@@ -1,0 +1,114 @@
+"""Find recently created Danbooru character tags missing from a dataset."""
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
+
+from danbooru_client import danbooru_get
+from booru_downloader import SCORE_FILTER, DatasetCountError, dataset_snapshot
+
+
+@dataclass(frozen=True)
+class CharacterOptions:
+    since: str = '2025-01-01'
+    min_posts: int = 100
+    target: int = 200
+    source: str = 'Both'
+    scope: str = 'Below target'
+    score_filter: str = ''
+    rating_targets: tuple | None = None
+
+    def __post_init__(self):
+        if date.fromisoformat(self.since).isoformat() != self.since:
+            raise ValueError('Use YYYY-MM-DD for the creation date.')
+        if any(type(n) is not int or n < 1 for n in (self.min_posts, self.target)):
+            raise ValueError('Minimum posts and target must be positive whole numbers.')
+        if self.source not in ('Danbooru', 'Gelbooru', 'Both') or self.scope not in ('Absent only', 'Below target'):
+            raise ValueError('Choose a valid source and dataset rule.')
+        if self.score_filter and not SCORE_FILTER.fullmatch(self.score_filter):
+            raise ValueError('Use a score filter such as score:>=10, or leave it blank.')
+        if self.rating_targets is not None and (len(self.rating_targets) != 4 or
+                any(type(n) is not int or n < 0 for n in self.rating_targets) or not any(self.rating_targets)):
+            raise ValueError('Set a nonnegative target for each rating, with at least one above zero.')
+
+
+def local_counts(root, cancel, log):
+    from dataset_manager import scan_dataset
+    folders = [p for p in (root / 'done', root / 'done1') if p.exists()]
+    dataset = scan_dataset(folders, progress=log, cancelled=cancel.is_set)
+    if dataset is None:
+        return None
+    if dataset.warnings:
+        raise DatasetCountError('Cannot reliably count done/ and done1/. Fix unreadable tag files or folders first.')
+    return dataset_snapshot(dataset)
+
+
+def discover(options, root, cancel, log=lambda text: None):
+    """Return complete results; cancellation returns None and never changes queues."""
+    from dataset_manager import normalize
+    counts = local_counts(root, cancel, log)
+    if counts is None or cancel.is_set():
+        return None
+    results, seen = [], set()
+    cursor = None
+    cutoff = datetime.combine(date.fromisoformat(options.since), datetime.min.time(), timezone.utc)
+    while not cancel.is_set():
+        params = {'search[category]': 4, 'search[created_at]': f'>={options.since}',
+                  'search[post_count]': f'>={options.min_posts}',
+                  'search[is_deprecated]': 'false', 'search[order]': 'date', 'limit': 100}
+        if cursor is not None:
+            params['page'] = f'b{cursor}'
+        with danbooru_get('https://danbooru.donmai.us/tags.json', params=params, timeout=30) as response:
+            response.raise_for_status()
+            tags = response.json()
+        if cancel.is_set():
+            return None
+        if not isinstance(tags, list) or any(not isinstance(t, dict) for t in tags):
+            raise ValueError('Unexpected character search response.')
+        if not tags:
+            return results
+        ids = []
+        for tag in tags:
+            identifier = int(tag['id'])
+            if identifier < 1 or (cursor is not None and identifier >= cursor):
+                raise ValueError('Character search pagination did not advance.')
+            ids.append(identifier)
+            if identifier in seen:
+                continue
+            seen.add(identifier)
+            name = tag['name']
+            created = datetime.fromisoformat(tag['created_at'].replace('Z', '+00:00'))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if (int(tag['category']) != 4 or int(tag['post_count']) < options.min_posts
+                    or created < cutoff or tag.get('is_deprecated', False)):
+                continue
+            if not isinstance(name, str) or not name or any(c.isspace() for c in name):
+                raise ValueError('Invalid character tag name.')
+            current = counts.get(normalize(name), 0)
+            ratings = ({rating: target for rating, target in zip('gsqe', options.rating_targets)
+                        if target > counts.get((normalize(name), rating), 0)}
+                       if options.rating_targets is not None else None)
+            if ((not ratings if ratings is not None else current >= options.target)
+                    or (options.scope == 'Absent only' and current)):
+                continue
+            results.append({'name': name, 'post_count': int(tag['post_count']),
+                            'created_at': tag['created_at'], 'local_count': current,
+                            'target': options.target, 'score_filter': options.score_filter,
+                            'rating_targets': ratings})
+        cursor = min(ids)
+        log(f'Checked {len(seen):,} character tags; {len(results):,} missing or underfilled.')
+    return None
+
+
+def search_rows(results, source):
+    sources = ('Danbooru', 'Gelbooru') if source == 'Both' else (source,)
+    rows = []
+    for result in results:
+        ratings = result.get('rating_targets')
+        for rating, target in (ratings.items() if ratings is not None else [(None, result['target'])]):
+            for site in sources:
+                label = {'g': 'general', 's': 'sensitive', 'q': 'questionable', 'e': 'explicit'}.get(rating)
+                query = ' '.join(filter(None, (result['name'], f'rating:{label}' if label else '',
+                                              result.get('score_filter', ''),
+                                              'order:score' if site == 'Danbooru' else 'sort:score')))
+                rows.append(dict(source=site, tags=query, limit='100', target=str(target)))
+    return rows

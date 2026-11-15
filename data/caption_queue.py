@@ -35,13 +35,27 @@ def new_batch(label, own_download=False):
     identifier = uuid.uuid4().hex
     folder = QUEUE_DIR / identifier
     folder.mkdir(parents=True)
-    handle = download_lock(identifier) if own_download else None
+    handle = None
     try:
+        if own_download:
+            handle = download_lock(identifier)
+            if handle is None:
+                raise OSError('Could not acquire ownership of the new download batch')
         with connect() as db:
             db.execute("INSERT INTO jobs VALUES (?, ?, 0, 'Downloading', NULL)", (identifier, label))
     except Exception:
         if handle:
             handle.close()
+            try:
+                (folder / '.downloading.lock').unlink(missing_ok=True)
+            except OSError:
+                pass
+        # No job was committed. Remove only an empty folder; never discard
+        # unexpected files if something else wrote into it during creation.
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
         raise
     return (identifier, folder, handle) if own_download else (identifier, folder)
 
