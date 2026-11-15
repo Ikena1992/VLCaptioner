@@ -173,6 +173,7 @@ def get_cached_caption(image_path, caption_kind, model, prompt, cache_path=CAPTI
             ).fetchone()
             if (candidate is not None and candidate[:3] == (image_digest, caption_kind, model)
                     and isinstance(candidate[3], str) and isinstance(candidate[4], str)
+                    and candidate[4].strip()
                     and canonical_cache_prompt(candidate[3]) == canonical):
                 row = (candidate[4],)
                 break
@@ -184,6 +185,7 @@ def get_cached_caption(image_path, caption_kind, model, prompt, cache_path=CAPTI
             )
             for cached_prompt, caption in candidates:
                 if (isinstance(cached_prompt, str) and isinstance(caption, str)
+                        and caption.strip()
                         and canonical_cache_prompt(cached_prompt) == canonical):
                     row = (caption,)
                     break

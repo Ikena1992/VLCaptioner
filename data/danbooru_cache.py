@@ -31,7 +31,9 @@ class TagCategoryCache:
                     "SELECT category FROM tag_categories WHERE tag = ?",
                     (candidate,),
                 ).fetchone()
-                if row is not None:
+                # Historical failed lookups were stored as NULL. They must not
+                # hide a known category under another equivalent spelling.
+                if row is not None and row[0] is not None:
                     matches.append(row[0])
             # A legacy cache can contain duplicate spellings with conflicting
             # values. Prefer the character category when any spelling confirms it.
@@ -73,9 +75,9 @@ class TagCategoryCache:
     def pop(self, tag: str, default=None):
         value = self.get(tag, default)
         with closing(sqlite3.connect(self.database_path)) as database, database:
-            database.execute(
+            database.executemany(
                 "DELETE FROM tag_categories WHERE tag = ?",
-                (normalize_cache_key(tag),),
+                [(key,) for key in self._candidate_keys(tag)],
             )
         return value
 

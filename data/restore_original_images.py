@@ -48,7 +48,9 @@ def copy_caption_cache(old, new, cache_folder):
             if 'captions' in tables:
                 for kind, model, prompt, caption in db.execute(
                         'SELECT caption_kind, model, prompt, caption FROM captions WHERE image_hash=?', (old,)).fetchall():
-                    if not caption.strip():
+                    # JSON contains pixel coordinates tied to the old dimensions.
+                    # Text captions can be reused; spatial JSON must be regenerated.
+                    if kind == 'json' or not caption.strip():
                         continue
                     digest = hashlib.sha256(bytes.fromhex(new))
                     digest.update(f'\0{kind}\0{model}\0{prompt}'.encode('utf-8'))
