@@ -10,6 +10,7 @@ from tkinter import messagebox, scrolledtext, filedialog
 from tkinter import font as tkfont
 
 import ttkbootstrap as ttk
+from ttkbootstrap.dialogs import Querybox, Messagebox
 try:
     from ttkbootstrap.widgets.scrolled import ScrolledFrame
 except ImportError:
@@ -44,11 +45,11 @@ def search_identity(row):
     """Compare equivalent single-character searches regardless of token order."""
     source, query = row['source'], row['tags']
     try:
-        tag = gap_tag(source, query).casefold()
+        tag = gap_tag(source, query).lower()
         score = tuple(sorted(token.casefold() for token in query.split() if SCORE_FILTER.fullmatch(token)))
         return source, tag, query_rating(query), score, query_official_art(query)
     except ValueError:
-        return source, ' '.join(query.casefold().split())
+        return source, ' '.join(query.lower().split())
 
 
 def download_job_from_row(row, blacklist):
@@ -247,24 +248,12 @@ class DownloaderGUI:
             widget.grid(row=index, column=1, sticky='ew', pady=6)
             self.character_widgets.append(widget)
         fields.columnconfigure(1, weight=1)
-        ttk.Label(page, text='Oldest image date is a separate filter: the earliest accessible Danbooru post must fall '
-                  'between that date and today (UTC). Leave blank to disable. This age check ignores score, rating, '
-                  'and blacklist filters, and includes deleted records when accessible. Unavailable posts can make it incomplete.',
-                  wraplength=780, bootstyle='secondary').pack(anchor='w', pady=(6, 0))
         ttk.Checkbutton(page, text='Exclude likely outfit/variant tags (character implications)',
                         variable=self.character_fields['exclude_variants'], onvalue='yes', offvalue='no').pack(anchor='w', pady=(8, 0))
         ttk.Label(page, text='Not definitive: implications can be missing, so variants may still appear. '
                   'Character parents can also be umbrella identities, so valid main tags may be excluded. '
                   'This only skips tags with an active implication to another Character tag.',
                   wraplength=780, bootstyle='warning').pack(anchor='w', pady=(4, 0))
-        ratings = ttk.Labelframe(page, text='Target images per character and rating (0 skips that rating)', padding=8)
-        ratings.pack(fill='x', pady=(10, 0))
-        for index, (rating, label) in enumerate(zip('gsqe', ('General', 'Sensitive', 'Questionable', 'Explicit'))):
-            ttk.Label(ratings, text=label).grid(row=0, column=index, sticky='w', padx=6)
-            widget = ttk.Entry(ratings, textvariable=self.character_fields[f'rating_{rating}'], width=10)
-            widget.grid(row=1, column=index, sticky='ew', padx=6)
-            ratings.columnconfigure(index, weight=1)
-            self.character_widgets.append(widget)
         official = ttk.Frame(page)
         official.pack(fill='x', pady=(10, 0))
         ttk.Checkbutton(official, text='Add official art row (Danbooru, all ratings), target:',
@@ -273,19 +262,22 @@ class DownloaderGUI:
         widget = ttk.Entry(official, textvariable=self.character_fields['official_art_target'], width=10)
         widget.pack(side='left')
         self.character_widgets.append(widget)
-        ttk.Label(page, text='Minimum posts measures total Danbooru availability, before blacklist filtering. '
-                  'Below target includes partially filled characters. Both sources share the same total target; '
-                  'Gelbooru fills any gap left by Danbooru. Score filters restrict downloads, not the total post-count threshold '
-                  'or existing dataset counts. The official art target counts images with both the character and official_art tags; '
-                  'its extra row uses Danbooru sorted by score, without a rating or minimum score filter. '
-                  'Enable automatic captioning to move downloads into done/.',
-                  wraplength=780, bootstyle='secondary').pack(anchor='w', pady=16)
+        ratings = ttk.Labelframe(page, text='Target images per character and rating (0 skips that rating)', padding=8)
+        ratings.pack(fill='x', pady=(10, 0))
+        for index, (rating, label) in enumerate(zip('gsqe', ('General', 'Sensitive', 'Questionable', 'Explicit'))):
+            ttk.Label(ratings, text=label).grid(row=0, column=index, sticky='w', padx=6)
+            widget = ttk.Entry(ratings, textvariable=self.character_fields[f'rating_{rating}'], width=10)
+            widget.grid(row=1, column=index, sticky='ew', padx=6)
+            ratings.columnconfigure(index, weight=1)
+            self.character_widgets.append(widget)
         actions = ttk.Frame(page)
         actions.pack(fill='x')
         self.discover_button = ttk.Button(actions, text='Find and add missing characters', command=self.start_discovery)
         self.discover_button.pack(side='left')
         self.discovery_stop = ttk.Button(actions, text='Cancel search', command=self.discovery_cancel.set, state='disabled')
         self.discovery_stop.pack(side='left', padx=8)
+        self.add_character_button = ttk.Button(actions, text='Add character', command=self.add_character)
+        self.add_character_button.pack(side='left')
         exports = ttk.Frame(page)
         exports.pack(fill='x', pady=(8, 0))
         ttk.Button(exports, text='Export last results as JSON', command=self.export_characters).pack(side='left')
@@ -293,18 +285,49 @@ class DownloaderGUI:
         self.discovery_status = tk.StringVar(value='Ready. Existing queue rows are kept; duplicate searches are skipped.')
         ttk.Label(page, textvariable=self.discovery_status, wraplength=780).pack(anchor='w', pady=16)
 
+    def character_options(self, discovery=True):
+        values = {key: value.get().strip() for key, value in self.character_fields.items()}
+        official_target = int(values['official_art_target']) if values['official_art_enabled'] == 'yes' else 0
+        ratings = tuple(int(values[f'rating_{r}']) for r in 'gsqe')
+        return CharacterOptions(
+            since=values['since'] if discovery else '2025-01-01',
+            min_posts=int(values['min_posts']) if discovery else 1,
+            target=sum(ratings) + official_target, source=values['source'],
+            scope=values['scope'] if discovery else 'Below target',
+            score_filter=minimum_score_filter(values['score_filter']), rating_targets=ratings,
+            exclude_variants=values['exclude_variants'] == 'yes' if discovery else False,
+            oldest_post_since=values['oldest_post_since'] if discovery else '',
+            official_art_target=official_target)
+
+    def add_character(self):
+        if self.running or self.discovery_running or self.closing:
+            return
+        name = Querybox.get_string(title='Add character', prompt=
+            'Enter one character tag, e.g. anis_(nikke).\n'
+            'Uses current sources, rating targets, minimum score and official art option.\n'
+            'Adds directly; discovery date, post-count and variant filters are bypassed.', parent=self.root)
+        if name is None or self.running or self.discovery_running or self.closing:
+            return
+        try:
+            name = name.strip().lower().replace(r'\_', '_').replace(r'\(', '(').replace(r'\)', ')')
+            if (not name or any(c.isspace() or c in ':*?\\' for c in name)
+                    or name.startswith(('-', '~'))):
+                raise ValueError('Enter a single character tag, without search filters or wildcards.')
+            options = self.character_options(discovery=False)
+        except (ValueError, TypeError) as error:
+            Messagebox.show_error(title='Add character', message=str(error), parent=self.root)
+            return
+        self.discovery_cancel.clear()
+        result = dict(name=name, target=options.target, score_filter=options.score_filter,
+                      rating_targets={rating: target for rating, target in zip('gsqe', options.rating_targets) if target},
+                      official_art_target=options.official_art_target)
+        self.add_character_results([result], options.source, remember_results=False)
+
     def start_discovery(self):
         if self.running or self.discovery_running or self.closing:
             return
         try:
-            values = {key: value.get().strip() for key, value in self.character_fields.items()}
-            official_target = int(values['official_art_target']) if values['official_art_enabled'] == 'yes' else 0
-            options = CharacterOptions(values['since'], int(values['min_posts']), sum(int(values[f'rating_{r}']) for r in 'gsqe') + official_target,
-                                       values['source'], values['scope'], minimum_score_filter(values['score_filter']),
-                                       tuple(int(values[f'rating_{r}']) for r in 'gsqe'),
-                                       exclude_variants=values['exclude_variants'] == 'yes',
-                                       oldest_post_since=values['oldest_post_since'],
-                                       official_art_target=official_target)
+            options = self.character_options()
         except (ValueError, TypeError):
             messagebox.showerror('Missing characters', 'Enter valid YYYY-MM-DD dates (oldest image date cannot be in the future), positive minimum posts, nonnegative rating and official art targets (at least one above zero), and an optional whole-number minimum score such as 5.', parent=self.root)
             return
@@ -314,6 +337,7 @@ class DownloaderGUI:
         self.discovery_cancel.clear()
         self.discovery_running = True
         self.discover_button.configure(state='disabled')
+        self.add_character_button.configure(state='disabled')
         self.discovery_stop.configure(state='normal')
         self.start_button.configure(state='disabled')
         self.discovery_status.set('Searching Danbooru API character tags…')
@@ -349,11 +373,12 @@ class DownloaderGUI:
             self.events.put(('character_status', 'Could not start character search.'))
             self.events.put(('character_finished', None))
 
-    def add_character_results(self, results, source):
+    def add_character_results(self, results, source, remember_results=True):
         if self.closing or self.discovery_cancel.is_set():
             return
         self.finish_cell_edit()
-        self.character_results = results
+        if remember_results:
+            self.character_results = results
         existing = {search_identity(row): identifier for identifier, row in self.rows.items()}
         blank_rows = iter(identifier for identifier, row in self.rows.items() if not row['tags'].strip())
         added = updated = 0
@@ -381,8 +406,10 @@ class DownloaderGUI:
             added += 1
         self.update_row_count()
         self.select_row()
-        self.save_settings()
-        self.discovery_status.set(f'{len(results):,} eligible characters; added {added:,} searches, updated {updated:,} targets. Review Search queue, then start downloads.')
+        if self.save_settings() is False:
+            self.discovery_status.set('Queue updated in memory, but could not be saved. Keep this window open; fix disk space or permissions before closing.')
+            return
+        self.discovery_status.set(f'{len(results):,} characters; added {added:,} searches, updated {updated:,} targets. Review Search queue, then start downloads.')
 
     def export_characters(self):
         if not self.character_results:
@@ -735,6 +762,7 @@ class DownloaderGUI:
         self.caption_toggle.configure(state="disabled")
         self.batch_entry.configure(state="disabled")
         self.running = True
+        self.add_character_button.configure(state='disabled')
         self.blacklist_entry.configure(state="disabled")
         self.cancel.clear()
         self.add_button.configure(state="disabled")
@@ -880,6 +908,7 @@ class DownloaderGUI:
                     continue
                 if kind == 'character_finished':
                     self.discovery_running = False
+                    self.add_character_button.configure(state='normal')
                     self.discovery_stop.configure(state='disabled')
                     self.discover_button.configure(state='normal')
                     if not self.closing:
@@ -906,6 +935,7 @@ class DownloaderGUI:
                     self.blacklist_entry.configure(state="normal")
                     self.add_button.configure(state="normal")
                     self.start_button.configure(state="normal")
+                    self.add_character_button.configure(state='normal')
                     self.stop_button.configure(state="disabled")
                     self.set_row_controls(True)
                     self.save_settings()

@@ -254,6 +254,11 @@ image's `.tag` file instead.
 Choose Danbooru, Gelbooru, or both as download sources; character discovery always uses Danbooru.
 Click **Find and add missing characters** to append searches without starting
 downloads. Existing searches are retained and duplicates are skipped.
+**Add character** opens a text field for one tag and adds its rating rows using
+the current sources, targets, minimum score, and optional official-art row.
+Manual additions bypass discovery date, minimum-post, and variant filters.
+Duplicate searches are skipped, matching images already in the dataset count
+toward download targets, and the last discovery export remains available.
 Rerunning discovery updates targets on matching eligible searches it generated. Editing a search
 manually keeps its custom target on subsequent discovery runs.
 Both sources use the same target for each rating, so Gelbooru fills any remaining gap. Review the
