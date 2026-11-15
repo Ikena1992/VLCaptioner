@@ -23,6 +23,15 @@ from fetch_danbooru_tags import save_tags
 MD5 = re.compile(r"^[0-9a-f]{32}$", re.I)
 SCORE_FILTER = re.compile(r'score:(?:>=|<=|>|<|=)?-?\d+', re.I)
 ALWAYS_BLACKLISTED = frozenset({'animated'})
+
+
+def local_scan_status(message):
+    """Label local counting separately from API progress without folder paths."""
+    if message.startswith('Scanning '):
+        return 'Local dataset: counting image tags…'
+    return 'Local dataset: ' + message
+
+
 RATINGS = {'g': 'g', 'general': 'g', 's': 's', 'sensitive': 's', 'safe': 's',
            'q': 'q', 'questionable': 'q', 'e': 'e', 'explicit': 'e'}
 
@@ -298,7 +307,8 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
         if snapshot_key not in gap_progress:
             folders = [folder for folder in (images, done, done.parent / 'done1') if folder.exists()]
             log('Counting tags in images/ and done/ once for this download run...')
-            dataset = scan_dataset(folders, cancelled=cancel.is_set, tag_fallback=True)
+            dataset = scan_dataset(folders, progress=lambda text: log(local_scan_status(text)),
+                                   cancelled=cancel.is_set, tag_fallback=True)
             if dataset is None:
                 return counts
             if dataset.warnings:

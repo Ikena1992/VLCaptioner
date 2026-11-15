@@ -273,7 +273,7 @@ class DownloaderGUI:
         self.discover_button.configure(state='disabled')
         self.discovery_stop.configure(state='normal')
         self.start_button.configure(state='disabled')
-        self.discovery_status.set('Scanning local dataset and searching Danbooru…')
+        self.discovery_status.set('Searching Danbooru API character tags…')
         def work():
             try:
                 results = discover(options, PROJECT_DIR, self.discovery_cancel,
@@ -708,7 +708,7 @@ class DownloaderGUI:
                 self.events.put(("log", f"Row {index}: {job.source} — {job.tags}"))
                 try:
                     counts = run_job(job, images, done, known, self.cancel,
-                                     lambda count, stats: self.events.put(("status", f"Row {index}: {count} checked; {stats['downloaded']} downloaded")),
+                                     lambda count, stats: self.events.put(("status", f"Row {index}: {count} API posts checked; {stats['downloaded']} downloaded")),
                                      log=lambda message: self.events.put(("log", f"Row {index}: {message}")),
                                      on_download=received if self.caption_batches else None,
                                      destination=destination if self.caption_batches else None,

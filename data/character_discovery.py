@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
 from danbooru_client import danbooru_get
-from booru_downloader import SCORE_FILTER, DatasetCountError, dataset_snapshot
+from booru_downloader import SCORE_FILTER, DatasetCountError, dataset_snapshot, local_scan_status
 
 
 @dataclass(frozen=True)
@@ -33,14 +33,18 @@ class CharacterOptions:
 def local_counts(root, cancel, log):
     from dataset_manager import scan_dataset
     folders = [p for p in (root / 'images', root / 'done', root / 'done1') if p.exists()]
-    dataset = scan_dataset(folders, progress=log, cancelled=cancel.is_set, tag_fallback=True)
+    dataset = scan_dataset(folders, progress=lambda text: log(local_scan_status(text)),
+                           cancelled=cancel.is_set, tag_fallback=True)
     if dataset is None:
         return None
     if dataset.warnings:
         raise DatasetCountError('Cannot reliably count images/ and done/. Fix unreadable tag files or folders first.')
     if dataset.missing or dataset.empty:
         log(f'{dataset.missing + dataset.empty:,} images have no usable tags and cannot be matched to character targets.')
-    return dataset_snapshot(dataset)
+    log('Local dataset: building unique image counts by tag and rating…')
+    snapshot = dataset_snapshot(dataset)
+    log('Local image counts ready. Matching API character tags…')
+    return snapshot
 
 
 def discover(options, root, cancel, log=lambda text: None):
@@ -52,6 +56,7 @@ def discover(options, root, cancel, log=lambda text: None):
     counts = None
     results, seen = [], set()
     cursor = None
+    page = 0
     cutoff = datetime.combine(date.fromisoformat(options.since), datetime.min.time(), timezone.utc)
     while not cancel.is_set():
         params = {'search[category]': 4, 'search[created_at]': f'>={options.since}',
@@ -59,7 +64,8 @@ def discover(options, root, cancel, log=lambda text: None):
                   'search[is_deprecated]': 'false', 'search[order]': 'date', 'limit': 100}
         if cursor is not None:
             params['page'] = f'b{cursor}'
-        log(f'Searching Danbooru character tags; {len(seen):,} checked so far…')
+        page += 1
+        log(f'Danbooru API: requesting character tags, page {page:,}; {len(seen):,} tags checked…')
         with danbooru_get('https://danbooru.donmai.us/tags.json', params=params, timeout=30) as response:
             response.raise_for_status()
             tags = response.json()
@@ -112,7 +118,7 @@ def discover(options, root, cancel, log=lambda text: None):
         if not ids:
             raise ValueError('Character search pagination did not advance.')
         cursor = min(ids)
-        log(f'Checked {len(seen):,} character tags; {len(results):,} missing or underfilled.')
+        log(f'API character tags: {len(seen):,} checked; {len(results):,} missing or underfilled.')
     return None
 
 
