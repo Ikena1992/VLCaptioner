@@ -216,6 +216,14 @@ Edit searches directly in the queue: double-click a cell or select a row and
 press **F2**. **Enter** commits, **Escape** cancels, and **Tab** moves between
 cells. Edits are saved when committed. New rows default to a target of 200.
 Older saved rows without a target use their previous limit as the initial target.
+The queue's **Status** column marks queued searches, highlights the running row
+with its download count, and records finished, stopped, or failed searches.
+Finished means the search ended; it does not guarantee that all requested images
+were available or that automatic captioning has finished. Editing a search resets
+its status to queued.
+Starting downloads again skips finished rows, including after reopening the app.
+Stopped, failed, and finished-with-errors rows remain eligible to retry. Change
+a row's source, tags, or target to queue a finished search again.
 The `animated` tag is always blacklisted internally, even when the blacklist
 field is empty.
 
@@ -250,6 +258,10 @@ and **Export last results as JSON** saves the eligible character list.
 for example `classic_sombra, beauty\_(nikke)`.
 Tag creation dates describe when the tag was added to Danbooru, not when a
 character debuted or when its first image was posted.
+Character discovery always checks tag name/category history. It checks the earliest available version for the tag ID and skips
+only history strictly before the cutoff; changes within the date range remain
+eligible. Missing history does not exclude a tag. This adds an API lookup per
+eligible candidate and does not trace aliases to separate replacement tag IDs.
 
 Enable **Caption automatically** to process downloads in batches (default: 50)
 while downloading continues. Manage batches in the captioner's **Queue** tab.

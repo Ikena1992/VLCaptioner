@@ -30,6 +30,11 @@ def minimum_score_filter(value):
         raise ValueError('Minimum score must be a whole number, or blank.') from None
 
 
+def row_is_finished(row):
+    status = row.get('status', '')
+    return status == 'Finished' or status.startswith('Finished:')
+
+
 def search_identity(row):
     """Compare equivalent single-character searches regardless of token order."""
     source, query = row['source'], row['tags']
@@ -113,13 +118,16 @@ class DownloaderGUI:
         table_panel.columnconfigure(0, weight=1)
         ttk.Style().configure("DownloadRows.Treeview",
                               rowheight=max(30, tkfont.nametofont("TkDefaultFont").metrics("linespace") + 10))
-        self.table = ttk.Treeview(table_panel, columns=("source", "tags", "target"),
+        self.table = ttk.Treeview(table_panel, columns=("source", "tags", "target", "status"),
                                  show="headings", selectmode="extended", height=7,
                                  style="DownloadRows.Treeview")
-        for column, title, width in (("source", "Source", 110), ("tags", "Search tags", 430), ("target", "Target image count", 160)):
+        for column, title, width in (("source", "Source", 110), ("tags", "Search tags", 430), ("target", "Target image count", 160), ('status', 'Status', 210)):
             self.table.heading(column, text=title)
             self.table.column(column, width=width, minwidth=80, stretch=column == "tags")
         self.table.grid(row=0, column=0, sticky="nsew")
+        self.running_row_font = tkfont.nametofont('TkDefaultFont').copy()
+        self.running_row_font.configure(weight='bold')
+        self.table.tag_configure('running', font=self.running_row_font)
         scrollbar = ttk.Scrollbar(table_panel, orient="vertical", command=lambda *args: (self.finish_cell_edit(), self.table.yview(*args)))
         horizontal = ttk.Scrollbar(table_panel, orient="horizontal", command=lambda *args: (self.finish_cell_edit(), self.table.xview(*args)))
         self.table.configure(yscrollcommand=scrollbar.set, xscrollcommand=horizontal.set)
@@ -310,7 +318,7 @@ class DownloaderGUI:
                 # preserving manually entered rows and their custom targets.
                 if previous.get('character_generated') and previous['target'] != row['target']:
                     previous['target'] = row['target']
-                    self.table.item(identifier, values=tuple(previous[k] for k in ('source', 'tags', 'target')))
+                    self.set_row_status(identifier, 'Queued')
                     updated += 1
                 continue
             blank = next(blank_rows, None)
@@ -319,7 +327,7 @@ class DownloaderGUI:
             else:
                 identifier = blank
                 self.rows[blank] = row
-                self.table.item(blank, values=tuple(row[k] for k in ('source', 'tags', 'target')))
+                self.refresh_row(blank)
             self.rows[identifier]['character_generated'] = True
             existing[key] = identifier
             added += 1
@@ -411,6 +419,9 @@ class DownloaderGUI:
                 self.rows[identifier]['gap_group'] = row['gap_group']
             if row.get('character_generated') is True:
                 self.rows[identifier]['character_generated'] = True
+            saved_status = row.get('status')
+            if isinstance(saved_status, str):
+                self.set_row_status(identifier, 'Interrupted' if saved_status.startswith('Running') else saved_status)
 
     def save_settings(self):
         settings = {"auto_caption": self.auto_caption.get(), "batch_size": self.batch_size.get(), "blacklist_separator": "spaces", "blacklist": self.blacklist.get(), "rows": list(self.rows.values())}
@@ -428,9 +439,23 @@ class DownloaderGUI:
         self.row_count.set(f"{len(self.rows):,} searches")
 
     def add_row(self, source_value="Danbooru", tags_value="", target_value="200"):
-        identifier = self.table.insert("", "end", values=(source_value, tags_value, target_value))
+        identifier = self.table.insert("", "end", values=(source_value, tags_value, target_value, 'Queued'))
         self.rows[identifier] = dict(source=source_value, tags=tags_value, target=target_value)
         return identifier
+
+    def refresh_row(self, identifier):
+        row = self.rows[identifier]
+        status = row.get('status', 'Queued')
+        self.table.item(identifier, values=(row['source'], row['tags'], row['target'], status),
+                        tags=('running',) if status.startswith('Running') else ())
+
+    def set_row_status(self, identifier, status):
+        if identifier in self.rows:
+            if status == 'Queued':
+                self.rows[identifier].pop('status', None)
+            else:
+                self.rows[identifier]['status'] = status
+            self.refresh_row(identifier)
 
     def prepare_gap_download(self, tag):
         if self.running or self.closing:
@@ -447,7 +472,7 @@ class DownloaderGUI:
             else:
                 self.rows[identifier].update(source=source, tags=query, target=target)
                 row = self.rows[identifier]
-                self.table.item(identifier, values=(source, query, target))
+                self.set_row_status(identifier, 'Queued')
             identifiers.append(identifier)
             self.rows[identifier]['gap_group'] = group
         identifier = identifiers[0]
@@ -512,7 +537,7 @@ class DownloaderGUI:
         self.editor_widgets[column].place_forget()
         if cancel and identifier in self.rows:
             self.rows[identifier] = original
-            self.table.item(identifier, values=tuple(original[k] for k in ('source', 'tags', 'target')))
+            self.refresh_row(identifier)
             self.select_row()
         elif identifier in self.rows and self.rows[identifier] != original:
             self.save_settings()
@@ -568,9 +593,12 @@ class DownloaderGUI:
         if len(selected) != 1 or selected[0] not in self.rows:
             return
         row = self.rows[selected[0]]
+        values = dict(source=self.edit_source.get(), tags=self.edit_tags.get(), target=self.edit_target.get())
+        if all(row.get(key) == value for key, value in values.items()):
+            return
         row.pop('character_generated', None)
-        row.update(source=self.edit_source.get(), tags=self.edit_tags.get(), target=self.edit_target.get())
-        self.table.item(selected[0], values=(row["source"], row["tags"], row["target"]))
+        row.update(values)
+        self.set_row_status(selected[0], 'Queued')
         self.editor_hint.set("Target image count is the desired total of matching images in images/ and done/." if row["target"].strip() else
                              "Enter a positive target before starting downloads.")
         self.set_row_controls(True)
@@ -626,9 +654,13 @@ class DownloaderGUI:
             return
         blacklist = parse_blacklist(self.blacklist.get())
         jobs = []
+        pending_numbers = []
         for index, (identifier, row) in enumerate(self.rows.items(), 1):
+            if row_is_finished(row):
+                continue
             try:
                 jobs.append(download_job_from_row(row, blacklist))
+                pending_numbers.append(index)
             except ValueError as error:
                 self.search_notebook.select(self.search_page)
                 self.table.selection_set(identifier)
@@ -638,9 +670,18 @@ class DownloaderGUI:
                                      f"Row {index} ({row['source']}): {row['tags']}\n\n{error}", parent=self.root)
                 return
         if not jobs:
+            if self.rows:
+                self.status.set('All rows are finished. Edit a row to queue it again.')
+                return
             messagebox.showerror('Image downloader', 'Add at least one download row.', parent=self.root)
             return
-        self.save_settings()
+        self.active_row_ids = tuple(self.rows)
+        self.active_row_numbers = tuple(pending_numbers)
+        for number in pending_numbers:
+            self.set_row_status(self.active_row_ids[number - 1], 'Queued')
+        if self.save_settings() is False:
+            self.status.set('Downloads not started: queue settings could not be saved. Fix disk space or permissions, then retry.')
+            return
         self.caption_batches = self.auto_caption.get()
         self.chunk_size = size
         self.caption_toggle.configure(state="disabled")
@@ -702,20 +743,26 @@ class DownloaderGUI:
 
             gap_progress = {}
             track_gap = any(job.target_count is not None for job in jobs)
-            for index, job in enumerate(jobs, 1):
+            for position, job in enumerate(jobs, 1):
+                row_numbers = getattr(self, 'active_row_numbers', ())
+                index = row_numbers[position - 1] if position <= len(row_numbers) else position
                 if self.cancel.is_set():
                     break
                 self.events.put(("log", f"Row {index}: {job.source} — {job.tags}"))
+                self.events.put(('row_status', (index, 'Running')))
                 try:
                     counts = run_job(job, images, done, known, self.cancel,
-                                     lambda count, stats: self.events.put(("status", f"Row {index}: {count} API posts checked; {stats['downloaded']} downloaded")),
+                                     lambda count, stats: self.events.put(('row_progress', (index, count, stats['downloaded']))),
                                      log=lambda message: self.events.put(("log", f"Row {index}: {message}")),
                                      on_download=received if self.caption_batches else None,
                                      destination=destination if self.caption_batches else None,
                                      **({'gap_progress': gap_progress} if track_gap else {}))
                     self.events.put(("log", f"Row {index}: " + ", ".join(f"{value} {key}" for key, value in counts.items())))
                     had_errors = had_errors or bool(counts["failed"])
+                    state = 'Stopped' if self.cancel.is_set() else 'Finished with errors' if counts['failed'] else 'Finished'
+                    self.events.put(('row_status', (index, f"{state}: {counts['downloaded']} downloaded")))
                 except Exception as error:
+                    self.events.put(('row_status', (index, 'Stopped' if self.cancel.is_set() else 'Failed')))
                     had_errors = True
                     if isinstance(error, DatasetCountError):
                         self.events.put(('log', f'Downloads stopped: {error}'))
@@ -755,6 +802,20 @@ class DownloaderGUI:
             # Bound each batch so log traffic cannot starve Stop or window events.
             for _ in range(200):
                 kind, value = self.events.get_nowait()
+                if kind in ('row_status', 'row_progress'):
+                    index = value[0]
+                    identifiers = getattr(self, 'active_row_ids', ())
+                    if kind == 'row_progress':
+                        text = f'Running: {value[2]} downloaded'
+                        self.status.set(f'Row {index}: {value[1]} API posts checked; {value[2]} downloaded')
+                    else:
+                        text = value[1]
+                    if 0 < index <= len(identifiers):
+                        identifier = identifiers[index - 1]
+                        self.set_row_status(identifier, text)
+                        if text == 'Running' and not self.closing:
+                            self.table.see(identifier)
+                    continue
                 if kind == 'character_status':
                     self.discovery_status.set(value)
                     continue
@@ -791,6 +852,7 @@ class DownloaderGUI:
                     self.start_button.configure(state="normal")
                     self.stop_button.configure(state="disabled")
                     self.set_row_controls(True)
+                    self.save_settings()
         except queue.Empty:
             pass
         self.poll_job = self.root.after(25 if not self.events.empty() else 100, self.poll)

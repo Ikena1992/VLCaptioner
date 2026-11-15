@@ -30,6 +30,29 @@ class CharacterOptions:
             raise ValueError('Set a nonnegative target for each rating, with at least one above zero.')
 
 
+def earliest_tag_history(tag_id):
+    """Read the earliest available version across names/categories for a tag ID."""
+    with danbooru_get('https://danbooru.donmai.us/tag_versions.json', params={
+            'search[tag_id]': tag_id, 'search[order]': 'created_at_asc', 'limit': 1}, timeout=30) as response:
+        response.raise_for_status()
+        versions = response.json()
+    if not isinstance(versions, list) or any(not isinstance(v, dict) for v in versions):
+        raise ValueError('Unexpected tag history response.')
+    if not versions:
+        return None
+    timestamps = []
+    for version in versions:
+        if type(version.get('tag_id')) is not int or version['tag_id'] != tag_id:
+            raise ValueError('Tag history belongs to a different tag or has an invalid ID.')
+        if not isinstance(version.get('created_at'), str):
+            raise ValueError('Tag history has no valid timestamp.')
+        timestamp = datetime.fromisoformat(version['created_at'].replace('Z', '+00:00'))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        timestamps.append(timestamp.astimezone(timezone.utc))
+    return min(timestamps)
+
+
 def local_counts(root, cancel, log):
     from dataset_manager import scan_dataset
     folders = [p for p in (root / 'images', root / 'done', root / 'done1') if p.exists()]
@@ -111,10 +134,20 @@ def discover(options, root, cancel, log=lambda text: None):
             if ((not ratings if ratings is not None else current >= options.target)
                     or (options.scope == 'Absent only' and current)):
                 continue
+            log(f'Danbooru API: checking tag history for {name}…')
+            earliest = earliest_tag_history(identifier)
+            if cancel.is_set():
+                return None
+            if earliest is not None and earliest < cutoff:
+                log(f'Skipped {name}: tag history starts {earliest.date()}, before {options.since}.')
+                continue
+            if earliest is None:
+                log(f'{name}: no tag history available; keeping the candidate.')
             results.append({'name': name, 'post_count': int(tag['post_count']),
                             'created_at': tag['created_at'], 'local_count': current,
                             'target': options.target, 'score_filter': options.score_filter,
-                            'rating_targets': ratings})
+                            'rating_targets': ratings,
+                            'earliest_history_at': earliest.isoformat() if earliest else None})
         if not ids:
             raise ValueError('Character search pagination did not advance.')
         cursor = min(ids)
