@@ -1,9 +1,8 @@
-from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS
+from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS, read_image_metadata
 from runtime_config import pipeline_images
 from source_tag_file import read_source_tags
 from pathlib import Path
 from contextlib import closing
-import csv
 import html
 import sqlite3
 import re
@@ -11,6 +10,7 @@ from collections import Counter
 from tqdm import tqdm  # pip install tqdm
 from caption_terminology import build_terminology_section
 from cache_seed import ensure_runtime_cache
+from caption_characters import clean_explanation, display_character_name, normalize_character_key, select_character_tags
 
 # -------------------------------------------------
 # Configuration
@@ -96,15 +96,6 @@ TEXT_WORDS = {
     "signature",
 }
 
-CHARACTER_EXCLUSIONS = {
-    "gilberta (arknights)": {"angelina (arknights)"},
-    "laevatain (arknights)": {"surtr (arknights)"},
-    "female endministrator (arknights)": {"endministrator (arknights)"},
-    "male endministrator (arknights)": {"endministrator (arknights)"},
-    "ardelia_(arknights)": {"eyjafjalla_(arknights)"},
-}
-
-
 # -------------------------------------------------
 # Helpers
 # -------------------------------------------------
@@ -113,28 +104,6 @@ def normalize_tag(tag: str) -> str:
     tag = tag.strip().lower().replace("_", " ")
     tag = re.sub(r"\s+", " ", tag)
     return tag
-
-
-def normalize_character_key(name: str) -> str:
-    """Normalize character names for matching, while keeping parenthetical series names."""
-    name = name.strip().lower().replace("_", " ")
-    name = re.sub(r"\s+", " ", name)
-    return name
-
-
-def display_character_name(name: str) -> str:
-    """Remove parenthetical series labels and make names readable."""
-    name = re.sub(r"[\s_]*\([^)]*\)", "", name)
-    name = name.replace("_", " ")
-    name = re.sub(r"\s+", " ", name)
-    return name.strip()
-
-
-def clean_explanation(text: str) -> str:
-    """Remove unwanted trailing metadata from character explanations."""
-    text = re.split(r"\bh[45]\b|Voiced by", text, flags=re.IGNORECASE)[0]
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
 
 
 def _load_sqlite_explanations(
@@ -193,100 +162,6 @@ def load_wiki_explanations(database_path: Path) -> dict[str, str]:
     return _load_sqlite_explanations(database_path, "wiki_cache", "body")
 
 
-def load_local_metadata(image_path: Path) -> tuple[str | None, str | None]:
-    csv_file = image_path.with_suffix(".csv")
-    if not csv_file.exists():
-        return None, None
-
-    with open(csv_file, encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            return (
-                row.get("characters", "").strip(),
-                row.get("artists", "").strip(),
-            )
-
-    return None, None
-
-
-def get_local_franchise(image_path: Path) -> str:
-    """
-    Return the sidecar CSV copyright value for a Franchise line.
-
-    Empty values and values containing "original" are intentionally ignored.
-    """
-    csv_file = image_path.with_suffix(".csv")
-    if not csv_file.exists():
-        return ""
-
-    with open(csv_file, encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-
-        if not reader.fieldnames or "copyright" not in reader.fieldnames:
-            return ""
-
-        for row in reader:
-            copyright_value = row.get("copyright", "").strip()
-
-            if not copyright_value or "original" in copyright_value.lower():
-                return ""
-
-            return copyright_value
-
-    return ""
-
-
-def pick_best_character_variants(raw_names: list[str]) -> list[str]:
-    groups = {}
-
-    for name in raw_names:
-        base = display_character_name(name).lower()
-
-        if base not in groups:
-            groups[base] = []
-
-        groups[base].append(name)
-
-    def score(name: str) -> tuple[int, int]:
-        return (
-            name.count("("),
-            len(name),
-        )
-
-    best = []
-    for variants in groups.values():
-        best_variant = max(variants, key=score)
-        best.append(best_variant)
-
-    return best
-
-
-def apply_character_exclusions(character_names: list[str]) -> list[str]:
-    normalized_exclusions = {
-        normalize_character_key(required): {
-            normalize_character_key(excluded)
-            for excluded in excluded_names
-        }
-        for required, excluded_names in CHARACTER_EXCLUSIONS.items()
-    }
-
-    lower_names = {
-        normalize_character_key(name)
-        for name in character_names
-    }
-
-    names_to_remove = set()
-
-    for required, excluded_names in normalized_exclusions.items():
-        if required in lower_names:
-            names_to_remove.update(excluded_names)
-
-    return [
-        name for name in character_names
-        if normalize_character_key(name) not in names_to_remove
-    ]
-
-
 def lookup_character_explanation(
     raw_name: str,
     display_name: str,
@@ -314,7 +189,7 @@ def lookup_character_explanation(
 
 
 def load_character_data(
-    image_path: Path,
+    characters_raw: str,
     char_explanations: dict[str, str],
     char_explanations_fallback: dict[str, str],
 ) -> tuple[list[str], list[tuple[str, str]]]:
@@ -323,32 +198,11 @@ def load_character_data(
     - character_names: display names used in the short-description instruction
     - character_descriptions: display name + general description pairs
     """
-    characters_raw, _ = load_local_metadata(image_path)
-
-    if not characters_raw:
-        return [], []
-
-    split_names = [
-        c.strip()
-        for c in characters_raw.split(",")
-        if c.strip()
-    ]
-
-    split_names = apply_character_exclusions(split_names)
-    raw_names = pick_best_character_variants(split_names)
-
-    seen = set()
     character_names = []
     character_descriptions = []
 
-    for raw_name in raw_names:
+    for raw_name in select_character_tags(characters_raw):
         display_name = display_character_name(raw_name)
-        display_key = display_name.lower()
-
-        if not display_name or display_key in seen:
-            continue
-
-        seen.add(display_key)
         character_names.append(display_name)
 
         explanation = lookup_character_explanation(
@@ -714,12 +568,15 @@ def build_gemma_prompts(
     raw_tags_normalized = [normalize_tag(t) for t in raw_tags]
     raw_tags_set = set(raw_tags_normalized)
 
+    metadata = read_image_metadata(image_path)
     character_names, character_descriptions = load_character_data(
-        image_path=image_path,
+        characters_raw=metadata.get("characters") or "",
         char_explanations=char_explanations,
         char_explanations_fallback=char_explanations_fallback,
     )
-    franchise = get_local_franchise(image_path)
+    franchise = (metadata.get("copyright") or "").strip()
+    if "original" in franchise.lower():
+        franchise = ""
 
     has_multi = any(tag in raw_tags_set for tag in MULTI_CHARACTER_TAGS)
     has_text = detect_text(raw_tags_set)

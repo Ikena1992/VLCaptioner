@@ -304,10 +304,15 @@ def recover_publications():
         shutil.rmtree(stage)
 
 
-def main() -> None:
+def recover_finalizations():
+    """Roll back incomplete publications and finish cleanup for committed ones."""
     recover_publications()
     for journal in DONE_DIR.glob(".finalize-*/committed.json"):
         finish_cleanup(journal.parent)
+
+
+def main() -> None:
+    recover_finalizations()
     if not IMAGES_DIR.exists() or not IMAGES_DIR.is_dir():
         print(f"Images folder does not exist: {IMAGES_DIR}")
         return

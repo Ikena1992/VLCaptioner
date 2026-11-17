@@ -60,9 +60,11 @@ def dataset_snapshot(dataset):
     snapshot.update({(tag, rating): len(ids & rated) for tag, ids in memberships.items()
                      for rating, rated in rating_ids.items()})
     official = memberships.get('official art', set())
-    snapshot.update({(tag, 'official_art'): len(ids & official) for tag, ids in memberships.items()})
-    snapshot.update({(tag, 'official_art', rating): len(ids & official & rated)
-                     for tag, ids in memberships.items() for rating, rated in rating_ids.items()})
+    for tag, ids in memberships.items():
+        official_ids = ids & official
+        snapshot[tag, 'official_art'] = len(official_ids)
+        for rating, rated in rating_ids.items():
+            snapshot[tag, 'official_art', rating] = len(official_ids & rated)
     return snapshot
 
 
@@ -82,6 +84,23 @@ def target_key(tag, query):
 
 class DatasetCountError(RuntimeError):
     """Gap targets cannot be trusted until local dataset problems are fixed."""
+
+
+def scan_target_counts(images, done, cancel, log):
+    """Use the same local image and sidecar rules for discovery and downloads."""
+    from dataset_manager import scan_dataset
+
+    folders = [folder for folder in (images, done, done.parent / 'done1') if folder.exists()]
+    dataset = scan_dataset(folders, progress=lambda message: log(local_scan_status(message)),
+                           cancelled=cancel.is_set, tag_fallback=True)
+    if dataset is None or cancel.is_set():
+        return None
+    if dataset.warnings:
+        raise DatasetCountError('Could not reliably count images/ and done/. Check unreadable tag files and folder permissions.')
+    if dataset.missing or dataset.empty:
+        log(f'{dataset.missing + dataset.empty:,} images have no usable tags and cannot be matched to targets.')
+    log('Local dataset: building unique image counts by tag and rating…')
+    return dataset_snapshot(dataset)
 
 
 @dataclass(frozen=True)
@@ -148,8 +167,13 @@ def failure_reason(error):
 
 def existing_hashes(*folders):
     return {p.stem.lower() for folder in folders if folder.exists()
-            for p in folder.rglob("*") if p.is_file() and MD5.fullmatch(p.stem)
-            and p.suffix.lower().lstrip(".") in IMAGE_EXTENSIONS}
+            for p in folder.rglob("*") if MD5.fullmatch(p.stem)
+            and p.suffix.lower().lstrip(".") in IMAGE_EXTENSIONS and p.is_file()}
+
+
+def image_folders(images, done, extra):
+    """Return roots in ascending priority for reporting duplicate locations."""
+    return ((images, images.name + '/'), (done, 'done/'), (extra, 'the local dataset'))
 
 
 class ImageIndex(set):
@@ -165,11 +189,27 @@ class ImageIndex(set):
     def refresh(self, force=False):
         if not force and time.monotonic() - self.last_scan < 5:
             return
-        for folder in (self.images, self.done, self.done1):
+        for folder, location in image_folders(self.images, self.done, self.done1):
             for md5 in existing_hashes(folder):
-                self.locations[md5] = "the local dataset" if folder == self.done1 else folder.name + "/"
+                self.locations[md5] = location
                 self.add(md5)
         self.last_scan = time.monotonic()
+
+
+def duplicate_location(md5, images, done, known, *, force=False):
+    fallback = 'images/ or earlier in this queue'
+    if isinstance(known, ImageIndex):
+        known.refresh(force=force)
+        return known.locations.get(md5, fallback) if md5 in known else None
+    # Standalone callers check each folder at most once and stop at a match.
+    for folder, location in reversed(image_folders(images, done, done.parent / 'done1')):
+        if md5 in existing_hashes(folder):
+            return location
+    return fallback if md5 in known else None
+
+
+class ImageAlreadyExists(FileExistsError):
+    """The exclusive image publication encountered a concurrent writer."""
 
 
 def publish_bundle(temporary, target, staging):
@@ -188,7 +228,10 @@ def publish_bundle(temporary, target, staging):
                 continue
             publish_file(prepared, destination)
             changed.append(destination)
-        publish_file(temporary, target, overwrite=False)
+        try:
+            publish_file(temporary, target, overwrite=False)
+        except FileExistsError as error:
+            raise ImageAlreadyExists(target) from error
     except (OSError, ValueError):
         for destination in reversed(changed):
             original = originals[destination]
@@ -226,16 +269,8 @@ def save_original(post, source, images, done, known, cancel, log=lambda message:
     if not MD5.fullmatch(md5):
         log("Skipped: missing or invalid MD5 filename.")
         return "unavailable"
-    if isinstance(known, ImageIndex):
-        known.refresh()
-        present = md5 in known
-        location = known.locations.get(md5, "images/ or earlier in this queue")
-    else:
-        # Standalone callers without an index still receive a current folder check.
-        done1 = done.parent / "done1"
-        present = md5 in known or md5 in existing_hashes(images, done, done1)
-        location = "the local dataset" if md5 in existing_hashes(done1) else "done/" if md5 in existing_hashes(done) else "images/ or earlier in this queue"
-    if present:
+    location = duplicate_location(md5, images, done, known)
+    if location is not None:
         log(f"Skipped: matching MD5 image already in {location}.")
         known.add(md5)
         return "skipped"
@@ -273,12 +308,7 @@ def save_original(post, source, images, done, known, cancel, log=lambda message:
             return "cancelled"
         if digest.hexdigest() != md5:
             raise RuntimeError("Original file failed MD5 verification")
-        if isinstance(known, ImageIndex):
-            known.refresh(force=True)
-            present = md5 in known
-        else:
-            present = md5 in existing_hashes(images, done, done.parent / "done1")
-        if present:
+        if duplicate_location(md5, images, done, known, force=True) is not None:
             log("Skipped: matching image appeared in the local dataset during the download.")
             known.add(md5)
             return "skipped"
@@ -301,7 +331,7 @@ def save_original(post, source, images, done, known, cancel, log=lambda message:
             stage = "saving the image and tags"
             try:
                 publish_bundle(temporary, target, staging)
-            except FileExistsError:
+            except ImageAlreadyExists:
                 log("Skipped: destination image already exists; preserved the existing file.")
                 known.add(md5)
                 return "skipped"
@@ -323,33 +353,29 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
     images.mkdir(parents=True, exist_ok=True)
     counts = dict(downloaded=0, skipped=0, blacklisted=0, unavailable=0, failed=0)
     requested_rating = query_rating(job.tags)
+    requested_official = query_official_art(job.tags)
+    key = None
+    if job.target_count is not None:
+        if job.target_count < 1:
+            raise ValueError('Gap filling requires a positive dataset target')
+        key = target_key(gap_tag(job.source, job.tags), job.tags)
     gap = None
     progress = None
-    if job.target_count is not None or gap_progress is not None:
-        from dataset_manager import scan_dataset, normalize
+    if key is not None or gap_progress is not None:
+        from dataset_manager import normalize
         gap_progress = {} if gap_progress is None else gap_progress
-        snapshot_key = ('dataset_counts', str(done.resolve()))
-        downloaded_key = ('downloaded_counts', str(done.resolve()))
+        dataset_paths = (images.resolve(), done.resolve())
+        snapshot_key = ('dataset_counts', dataset_paths)
+        downloaded_key = ('downloaded_counts', dataset_paths)
         if snapshot_key not in gap_progress:
-            folders = [folder for folder in (images, done, done.parent / 'done1') if folder.exists()]
             log('Counting tags in images/ and done/ once for this download run...')
-            dataset = scan_dataset(folders, progress=lambda text: log(local_scan_status(text)),
-                                   cancelled=cancel.is_set, tag_fallback=True)
-            if dataset is None:
+            snapshot = scan_target_counts(images, done, cancel, log)
+            if snapshot is None:
                 return counts
-            if dataset.warnings:
-                raise DatasetCountError("Could not reliably count images/ and done/. Check unreadable tag files and folder permissions.")
-            if dataset.missing or dataset.empty:
-                log(f'{dataset.missing + dataset.empty:,} images have no usable tags and cannot be matched to targets.')
-            snapshot = dataset_snapshot(dataset)
             gap_progress[snapshot_key] = snapshot
             gap_progress[downloaded_key] = {}
         progress = gap_progress[downloaded_key]
-    if job.target_count is not None:
-        tag = gap_tag(job.source, job.tags)
-        if job.target_count < 1:
-            raise ValueError("Gap filling requires one positive tag and a positive dataset target")
-        key = target_key(tag, job.tags)
+    if key is not None:
         current = gap_progress[snapshot_key].get(key, 0)
         downloaded_earlier = progress.get(key, 0)
         gap = max(0, job.target_count - current - downloaded_earlier)
@@ -389,7 +415,7 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
                 if requested_rating and actual_rating != requested_rating:
                     post_log('Skipped: post rating does not match the requested rating.')
                     result = 'unavailable'
-                elif query_official_art(job.tags) and 'official_art' not in unescape(str(post.get('tag_string', post.get('tags', '')))).casefold().split():
+                elif requested_official and 'official_art' not in unescape(str(post.get('tag_string', post.get('tags', '')))).casefold().split():
                     post_log('Skipped: post is missing official_art.')
                     result = 'unavailable'
                 elif matches:
@@ -404,13 +430,12 @@ def run_job(job, images, done, known, cancel, report, log=lambda message: None,
                 if result == 'downloaded' and progress is not None:
                     post_tags = str(post.get('tag_string', post.get('tags', '')))
                     downloaded_tags = {normalize(value) for value in unescape(post_tags).split()}
-                    post_rating = RATINGS.get(str(post.get('rating', '')).lower())
                     if 'official art' in downloaded_tags:
                         downloaded_tags.update({(tag, 'official_art') for tag in list(downloaded_tags)})
-                    if post_rating:
-                        downloaded_tags.update({(*tag, post_rating) if isinstance(tag, tuple) else (tag, post_rating)
+                    if actual_rating:
+                        downloaded_tags.update({(*tag, actual_rating) if isinstance(tag, tuple) else (tag, actual_rating)
                                                 for tag in list(downloaded_tags)})
-                    if job.target_count is not None:
+                    if key is not None:
                         downloaded_tags.add(key)
                     for downloaded_tag in downloaded_tags:
                         progress[downloaded_tag] = progress.get(downloaded_tag, 0) + 1

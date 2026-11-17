@@ -1,5 +1,6 @@
 """Canonical image formats and companion-file policies for dataset tools."""
 
+import csv
 from pathlib import Path
 
 # Ordered so tools that choose the first matching image agree on precedence.
@@ -17,6 +18,23 @@ _COMPANION_SUFFIXES = tuple(sorted(COMPANION_EXTENSIONS, key=len, reverse=True))
 
 def is_image(path):
     return Path(path).suffix.lower() in IMAGE_EXTENSIONS
+
+
+def read_image_metadata(image_path):
+    """Read the first row of an image's metadata sidecar, if present."""
+    try:
+        with image_path.with_suffix('.csv').open(encoding='utf-8-sig', newline='') as source:
+            return next(csv.DictReader(source), {})
+    except FileNotFoundError:
+        return {}
+
+
+def read_optional_text(path):
+    """Read a UTF-8 sidecar when present, stripping surrounding whitespace."""
+    try:
+        return path.read_text(encoding='utf-8-sig').strip()
+    except FileNotFoundError:
+        return ''
 
 
 def companion_extension(path):

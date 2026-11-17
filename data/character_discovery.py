@@ -3,11 +3,20 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone, timedelta
 
 from danbooru_client import danbooru_get
-from booru_downloader import SCORE_FILTER, DatasetCountError, dataset_snapshot, local_scan_status
+from booru_downloader import SCORE_FILTER, scan_target_counts
 
 
 def utc_today():
     return datetime.now(timezone.utc).date()
+
+
+def utc_timestamp(value):
+    if not isinstance(value, str):
+        raise ValueError('Expected a timestamp from Danbooru.')
+    timestamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -69,12 +78,7 @@ def oldest_post_timestamp(posts, name):
     for post in posts:
         if not isinstance(post.get('tag_string'), str) or name not in post['tag_string'].split():
             raise ValueError('Oldest image does not contain the requested character tag.')
-        if not isinstance(post.get('created_at'), str):
-            raise ValueError('Oldest image has no valid timestamp.')
-        timestamp = datetime.fromisoformat(post['created_at'].replace('Z', '+00:00'))
-        if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=timezone.utc)
-        timestamps.append(timestamp.astimezone(timezone.utc))
+        timestamps.append(utc_timestamp(post.get('created_at')))
     return min(timestamps)
 
 
@@ -150,29 +154,14 @@ def earliest_tag_history(tag_id):
     for version in versions:
         if type(version.get('tag_id')) is not int or version['tag_id'] != tag_id:
             raise ValueError('Tag history belongs to a different tag or has an invalid ID.')
-        if not isinstance(version.get('created_at'), str):
-            raise ValueError('Tag history has no valid timestamp.')
-        timestamp = datetime.fromisoformat(version['created_at'].replace('Z', '+00:00'))
-        if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=timezone.utc)
-        timestamps.append(timestamp.astimezone(timezone.utc))
+        timestamps.append(utc_timestamp(version.get('created_at')))
     return min(timestamps)
 
 
 def local_counts(root, cancel, log):
-    from dataset_manager import scan_dataset
-    folders = [p for p in (root / 'images', root / 'done', root / 'done1') if p.exists()]
-    dataset = scan_dataset(folders, progress=lambda text: log(local_scan_status(text)),
-                           cancelled=cancel.is_set, tag_fallback=True)
-    if dataset is None:
-        return None
-    if dataset.warnings:
-        raise DatasetCountError('Cannot reliably count images/ and done/. Fix unreadable tag files or folders first.')
-    if dataset.missing or dataset.empty:
-        log(f'{dataset.missing + dataset.empty:,} images have no usable tags and cannot be matched to character targets.')
-    log('Local dataset: building unique image counts by tag and rating…')
-    snapshot = dataset_snapshot(dataset)
-    log('Local image counts ready. Matching API character tags…')
+    snapshot = scan_target_counts(root / 'images', root / 'done', cancel, log)
+    if snapshot is not None and not cancel.is_set():
+        log('Local image counts ready. Matching API character tags…')
     return snapshot
 
 
@@ -227,10 +216,8 @@ def discover(options, root, cancel, log=lambda text: None):
                 raise ValueError('Invalid character tag metadata.')
             if category != 4 or post_count < options.min_posts or deprecated:
                 continue
-            name = tag['name']
-            created = datetime.fromisoformat(tag['created_at'].replace('Z', '+00:00'))
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
+            name = tag.get('name')
+            created = utc_timestamp(tag.get('created_at'))
             if created < cutoff:
                 continue
             if not isinstance(name, str) or not name or any(c.isspace() for c in name):
@@ -278,7 +265,7 @@ def discover(options, root, cancel, log=lambda text: None):
                 if parent:
                     log(f'Skipped likely variant {name}: implies character tag {parent}.')
                     continue
-            results.append({'name': name, 'post_count': int(tag['post_count']),
+            results.append({'name': name, 'post_count': post_count,
                             'created_at': tag['created_at'], 'local_count': current,
                             'target': options.target, 'score_filter': options.score_filter,
                             'rating_targets': ratings,

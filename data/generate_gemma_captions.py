@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 from file_io import file_hash, atomic_write_text
-from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS, companion_paths
+from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS, companion_paths, read_image_metadata, read_optional_text
 
 from runtime_config import load_bool, pipeline_images
 from image_failures import is_skipped, skip_image
 
 import argparse
-import csv
 import hashlib
 import json
-import importlib.util
+from importlib import import_module
 import random
 import re
 import sqlite3
@@ -90,13 +89,7 @@ def is_token_repeat_error(error):
 
 
 def load_prompt_builder():
-    module_path = SCRIPT_DIR / "build_gemma_prompts.py"
-    spec = importlib.util.spec_from_file_location("gemma_prompt_builder", module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load prompt builder: {module_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_module("build_gemma_prompts")
 
 
 def initialize_cache(cache_path=CAPTION_CACHE):
@@ -233,15 +226,7 @@ def normalize_caption_output(text):
 
 def load_artist_names(image_path):
     """Read the comma-separated artist tags from the image's sidecar CSV."""
-    csv_file = image_path.with_suffix(".csv")
-    if not csv_file.exists():
-        return []
-
-    with csv_file.open(newline="", encoding="utf-8-sig") as file:
-        row = next(csv.DictReader(file), None)
-    if not row:
-        return []
-
+    row = read_image_metadata(image_path)
     raw_artists = row.get("artists") or row.get("artist") or ""
     return [artist.strip() for artist in raw_artists.split(",") if artist.strip()]
 
@@ -326,7 +311,7 @@ def discover_images(prompt_builder, parquet_captions, overwrite_caption_cache=Fa
             short_path, long_path = image.with_suffix(".short"), image.with_suffix(".long")
             complete = (
                 not overwrite_caption_files
-                and all(path.exists() and path.read_text(encoding="utf-8-sig").strip() for path in (short_path, long_path))
+                and all(read_optional_text(path) for path in (short_path, long_path))
             )
             torii_path = image.with_suffix(".toriiOutput")
             uses_parquet = image.stem.lower() in parquet_captions
@@ -566,21 +551,27 @@ def process_image(
     create_json=False,
     cache_path=CAPTION_CACHE,
 ):
-    if not overwrite_caption_files and all(
-        image_path.with_suffix(ext).exists() and image_path.with_suffix(ext).read_text(encoding="utf-8-sig").strip()
-        for ext in (".short", ".long")
-    ):
+    long_path = image_path.with_suffix(".long")
+    long_text = short_text = ""
+    if not overwrite_caption_files:
+        long_text = read_optional_text(long_path)
+        short_text = read_optional_text(image_path.with_suffix(".short"))
+    if long_text and short_text:
         if create_json:
             generate_json_sidecar(client, image_path, model, thinking, overwrite_caption_cache, context_size, cache_path)
         return
-    long_path = image_path.with_suffix(".long")
-    long_text = (
-        long_path.read_text(encoding="utf-8-sig").strip()
-        if long_path.exists() and not overwrite_caption_files else ""
-    )
-    reuse_existing_long = bool(long_text)
-    if not long_text:
-        long_text = parquet_captions.get(image_path.stem.lower(), "")
+    preserve_long = bool(long_text)
+    artist_names = load_artist_names(image_path)
+    if preserve_long:
+        # Resumed files may already contain the published artist credit.
+        long_text = validate_caption(caption_reference(long_text, artist_names), "long")
+    else:
+        parquet_text = parquet_captions.get(image_path.stem.lower())
+        if parquet_text:
+            try:
+                long_text = validate_caption(parquet_text, "long")
+            except CaptionReviewError as error:
+                tqdm.write(f"Ignoring invalid Parquet caption for {image_path.name}: {error}")
     if not long_text:
         long_text = generate_caption(
             client,
@@ -593,9 +584,12 @@ def process_image(
             thinking=thinking,
             cache_path=cache_path,
         )
-    long_text = validate_caption(long_text, "long")
-    if not reuse_existing_long and not overwrite_caption_files:
-        atomic_write_text(long_path, long_text + "\n")
+        long_text = validate_caption(long_text, "long")
+    if not preserve_long and not overwrite_caption_files and not short_text:
+        # A stale short caption must not make an unfinished pair look complete.
+        # Use final formatting so a resumed run can preserve this file as-is.
+        atomic_write_text(long_path, add_artist_prefix(long_text, artist_names) + "\n")
+        preserve_long = True
     short_text = generate_caption(
         client,
         image_path,
@@ -609,8 +603,8 @@ def process_image(
         cache_path=cache_path,
     )
     write_result(
-        image_path, short_text, long_text, load_artist_names(image_path),
-        preserve_existing_long=reuse_existing_long,
+        image_path, short_text, long_text, artist_names,
+        preserve_existing_long=preserve_long,
     )
     if create_json:
         generate_json_sidecar(client, image_path, model, thinking, overwrite_caption_cache, context_size, cache_path)
@@ -695,9 +689,7 @@ def main(argv=None):
     model = client.running_model() if configured_model.lower() == "auto" else configured_model
     print(f"Ollama model: {model} ({url})\nBackend config: {config}")
     initialize_cache()
-    finalizer.recover_publications()
-    for journal in finalizer.DONE_DIR.glob(".finalize-*/committed.json"):
-        finalizer.finish_cleanup(journal.parent)
+    finalizer.recover_finalizations()
     finish_image = build_image_finalizer(args.add_year_tag, args.add_copyright_tags)
     local_stems = {
         image.stem.lower()

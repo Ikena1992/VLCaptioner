@@ -1,13 +1,12 @@
-from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS
+from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS, read_image_metadata
 from runtime_config import pipeline_images
 from source_tag_file import read_source_tags
 from pathlib import Path
 from contextlib import closing
-import csv
 import sqlite3
-import re
 from tqdm import tqdm  # pip install tqdm
 from cache_seed import ensure_runtime_cache
+from caption_characters import clean_explanation, select_character_tags
 
 # -------------------------------------------------
 # Configuration
@@ -53,61 +52,6 @@ def load_wiki_explanations(database_path: Path) -> dict[str, str]:
     return _load_sqlite_explanations(database_path, "wiki_cache", "body")
 
 
-def load_local_metadata(image_path: Path) -> tuple[str | None, str | None]:
-    csv_file = image_path.with_suffix(".csv")
-    if not csv_file.exists():
-        return None, None
-
-    with open(csv_file, encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            return (
-                row.get("characters", "").strip(),
-                row.get("artists", "").strip(),
-            )
-
-    return None, None
-
-
-def pick_best_character_variants(raw_names):
-    groups = {}
-
-    for name in raw_names:
-        base = re.sub(r"\s*\([^)]*\)", "", name).strip().lower()
-
-        if base not in groups:
-            groups[base] = []
-
-        groups[base].append(name)
-
-    def score(name):
-        return (
-            name.count("("),  # more qualifiers = better
-            len(name)         # longer = better
-        )
-
-    best = []
-    for variants in groups.values():
-        best_variant = max(variants, key=score)
-        best.append(best_variant)
-
-    return best
-
-
-def clean_character_names(names):
-    cleaned = {
-        re.sub(r"\s*\([^)]*\)", "", n).strip().lower():
-        re.sub(r"\s*\([^)]*\)", "", n).strip()
-        for n in names
-    }
-    return list(cleaned.values())
-
-
-def clean_explanation(text: str) -> str:
-    text = re.split(r'h[45]|Voiced by', text, flags=re.IGNORECASE)[0]
-    return text.strip()
-
-
 # -------------------------------------------------
 # Core Logic
 # -------------------------------------------------
@@ -122,10 +66,12 @@ def build_torii_prompts(
         return None
 
     raw_tags = [
-        t.strip() for t in read_source_tags(tag_file.read_text(encoding="utf-8")).split(",") if t.strip()
+        t.strip() for t in read_source_tags(tag_file.read_text(encoding="utf-8-sig")).split(",") if t.strip()
     ]
     # ---------------- Characters ----------------
-    characters_raw, artists_raw = load_local_metadata(image_path)
+    metadata = read_image_metadata(image_path)
+    characters_raw = (metadata.get("characters") or "").strip()
+    artists_raw = (metadata.get("artists") or "").strip()
 
     artist_tags = set()
     if artists_raw:
@@ -135,35 +81,13 @@ def build_torii_prompts(
             if a.strip()
         }
 
-    character_names = []
+    character_names = select_character_tags(characters_raw)
     character_traits = []
-
-    if characters_raw:
-        split_names = [c.strip() for c in characters_raw.split(",") if c.strip()]
-
-        if "gilberta (arknights)" in map(str.lower, split_names):
-            split_names = [c for c in split_names if c.lower() != "angelina (arknights)"]
-        if "laevatain (arknights)" in map(str.lower, split_names):
-            split_names = [c for c in split_names if c.lower() != "surtr (arknights)"]
-        if "female endministrator (arknights)" in map(str.lower, split_names):
-            split_names = [c for c in split_names if c.lower() != "endministrator (arknights)"]
-        if "male endministrator (arknights)" in map(str.lower, split_names):
-            split_names = [c for c in split_names if c.lower() != "endministrator (arknights)"]
-        if "ardelia_(arknights)" in map(str.lower, split_names):
-            split_names = [c for c in split_names if c.lower() != "eyjafjalla_(arknights)"]
-
-        raw_names = pick_best_character_variants(split_names)
-        for raw_name in raw_names:
-            lookup_key = raw_name.lower()
-            explanation = (
-                char_explanations.get(lookup_key)
-                or char_explanations_fallback.get(lookup_key)
-            )
-            if explanation:
-                explanation = clean_explanation(explanation)
-                character_traits.append(f"{raw_name}: [{explanation}]")
-
-        character_names = raw_names
+    for raw_name in character_names:
+        lookup_key = raw_name.lower()
+        explanation = char_explanations.get(lookup_key) or char_explanations_fallback.get(lookup_key)
+        if explanation := clean_explanation(explanation or ""):
+            character_traits.append(f"{raw_name}: [{explanation}]")
 
     # -------------------------------------------------
     # Prompt Construction

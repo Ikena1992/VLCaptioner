@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from file_io import file_hash as image_hash, atomic_write_text
-from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS
+from dataset_files import IMAGE_EXTENSIONS as SUPPORTED_EXTENSIONS, read_optional_text
 
 from runtime_config import pipeline_images
 from image_failures import is_skipped, skip_image
 
-import importlib.util
+from importlib import import_module
 import re
 import sqlite3
 import sys
@@ -31,13 +31,7 @@ TORII_OUTPUT_CACHE = SCRIPT_DIR / "caches" / "toriiOutput.sqlite3"
 
 
 def load_prompt_builder():
-    module_path = SCRIPT_DIR / "build_torii_prompts.py"
-    spec = importlib.util.spec_from_file_location("torii_prompt_builder", module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load prompt builder: {module_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_module("build_torii_prompts")
 
 
 def initialize_cache(cache_path=TORII_OUTPUT_CACHE):
@@ -73,66 +67,67 @@ def write_output(image_path, text):
     atomic_write_text(image_path.with_suffix(".toriiOutput"), text + "\n", prefix=".torii-")
 
 
-def restore_or_cache_parquet_outputs(
-    parquet_folder, parquet_captions, cache_path=TORII_OUTPUT_CACHE
-):
-    candidates = {}
+def find_candidates(parquet_captions, cache_path=TORII_OUTPUT_CACHE):
+    """Find images that still need a Torii report after local and cache checks."""
+    candidates = []
+    missing_csv = []
     for image in sorted(IMAGES_DIR.glob("*.*")):
-        if is_skipped(image):
+        if (image.suffix.lower() not in SUPPORTED_EXTENSIONS
+                or image.stem.lower() in parquet_captions or not image.is_file()):
             continue
         try:
-            if image.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            if is_skipped(image) or read_optional_text(image.with_suffix(".long")):
                 continue
-            if image.stem.lower() in parquet_captions:
+            if read_optional_text(image.with_suffix(".toriiOutput")) or restore_cached_output(image, cache_path):
                 continue
-            if image.with_suffix(".toriiOutput").exists() or restore_cached_output(
-                image, cache_path
-            ):
+            if not image.with_suffix(".csv").is_file():
+                missing_csv.append(image.name)
                 continue
-            long_path = image.with_suffix(".long")
-            if long_path.exists() and long_path.read_text(encoding="utf-8-sig").strip():
-                continue
-            if not image.with_suffix(".csv").exists():
-                continue
-            candidates.setdefault(image.stem.lower(), []).append(image)
-
+            candidates.append(image)
         except Exception as error:
             skip_image(image, error)
+    return candidates, missing_csv
 
-    reports = load_parquet_torii_outputs(parquet_folder, set(candidates))
+
+def publish_report(image, report, cache_path=None):
+    write_output(image, report)
+    try:
+        if cache_path is None:
+            cache_output(image, report)
+        else:
+            cache_output(image, report, cache_path)
+    except (OSError, sqlite3.Error) as error:
+        tqdm.write(f"Saved Torii report for {image.name}; could not update its cache: {error}")
+
+
+def restore_or_cache_parquet_outputs(
+    parquet_folder, parquet_captions, cache_path=TORII_OUTPUT_CACHE, *, candidates=None,
+):
+    if candidates is None:
+        candidates, _ = find_candidates(parquet_captions, cache_path)
+    reports = load_parquet_torii_outputs(parquet_folder, {image.stem.lower() for image in candidates})
     restored = 0
-    for stem, report in reports.items():
-        for image in candidates[stem]:
-            try:
-                write_output(image, report)
-                cache_output(image, report, cache_path)
-                restored += 1
-            except Exception as error:
-                skip_image(image, error)
+    for image in candidates:
+        if not (report := reports.get(image.stem.lower())):
+            continue
+        try:
+            publish_report(image, report, cache_path)
+            restored += 1
+        except Exception as error:
+            skip_image(image, error)
     return restored
 
 
-def discover_images(prompt_builder, parquet_captions):
+def discover_images(prompt_builder, parquet_captions, *, scan=None):
+    candidates, skipped_missing_csv = find_candidates(parquet_captions) if scan is None else scan
+    if not candidates:
+        return {}, skipped_missing_csv
     explanations = prompt_builder.load_explanations(prompt_builder.CHARACTER_DB)
     fallback = prompt_builder.load_wiki_explanations(prompt_builder.WIKI_CACHE_DB)
     prompts = {}
-    skipped_missing_csv = []
-    for image in sorted(IMAGES_DIR.glob("*.*")):
+    for image in candidates:
         try:
-            if is_skipped(image):
-                continue
-            if image.suffix.lower() not in SUPPORTED_EXTENSIONS:
-                continue
-            if image.stem.lower() in parquet_captions:
-                continue
-            result = image.with_suffix(".toriiOutput")
-            if result.exists() or restore_cached_output(image):
-                continue
-            long_path = image.with_suffix(".long")
-            if long_path.exists() and long_path.read_text(encoding="utf-8-sig").strip():
-                continue
-            if not image.with_suffix(".csv").exists():
-                skipped_missing_csv.append(image.name)
+            if is_skipped(image) or read_optional_text(image.with_suffix(".toriiOutput")):
                 continue
             built = prompt_builder.build_torii_prompts(image, explanations, fallback)
             if built:
@@ -169,8 +164,7 @@ def process_image(client, image_path, model, prompts):
         if truncated or not long_text.strip():
             raise ValueError("Torii long caption was truncated or empty; no report was saved")
         text = f"# Structured analysis\n\n{structured.strip()}\n\n# Long detailed caption\n\n{long_text.strip()}"
-        write_output(image_path, text)
-        cache_output(image_path, text)
+        publish_report(image_path, text)
         return True, False
     except Exception as error:
         skip_image(image_path, error)
@@ -194,9 +188,10 @@ def main():
         if image.suffix.lower() in SUPPORTED_EXTENSIONS
     }
     parquet = load_parquet_captions(parquet_folder, local_stems)
-    restored = restore_or_cache_parquet_outputs(parquet_folder, parquet)
+    scan = find_candidates(parquet)
+    restored = restore_or_cache_parquet_outputs(parquet_folder, parquet, candidates=scan[0])
     print(f"Restored {restored} Torii report(s) from Parquet and cached them")
-    prompts, skipped_missing_csv = discover_images(load_prompt_builder(), parquet)
+    prompts, skipped_missing_csv = discover_images(load_prompt_builder(), parquet, scan=scan)
     if not prompts:
         print(f"Skipped without CSV metadata: {len(skipped_missing_csv)}")
         return 0
@@ -214,7 +209,7 @@ def main():
     if failed:
         print(
             f"Torii failed for {failed} image(s). "
-            "Continuing the pipeline without their Torii output."
+            "Continuing the pipeline with the remaining images."
         )
     return 0
 

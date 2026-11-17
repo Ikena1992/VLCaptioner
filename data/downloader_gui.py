@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from file_io import atomic_write_json, atomic_write_text
 import threading
-import uuid
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, filedialog
 from tkinter import font as tkfont
@@ -236,7 +235,6 @@ class DownloaderGUI:
                     'rating_g': '50', 'rating_s': '50', 'rating_q': '50', 'rating_e': '50',
                     'official_art_enabled': 'no', 'official_art_target': '10', 'exclude_variants': 'no'}
         self.character_fields = {key: tk.StringVar(value=value) for key, value in defaults.items()}
-        self.character_widgets = []
         for index, (key, title, choices) in enumerate((
                 ('since', 'Tag created on/after (YYYY-MM-DD)', None),
                 ('oldest_post_since', 'Oldest image on/after (optional, YYYY-MM-DD)', None),
@@ -250,7 +248,6 @@ class DownloaderGUI:
             widget.grid(row=index, column=1, sticky='ew', pady=6)
             if choices:
                 disable_scroll_changes(widget)
-            self.character_widgets.append(widget)
         fields.columnconfigure(1, weight=1)
         ttk.Checkbutton(page, text='Exclude likely outfit/variant tags (character implications)',
                         variable=self.character_fields['exclude_variants'], onvalue='yes', offvalue='no').pack(anchor='w', pady=(8, 0))
@@ -265,7 +262,6 @@ class DownloaderGUI:
                         onvalue='yes', offvalue='no').pack(side='left', padx=(0, 12))
         widget = ttk.Entry(official, textvariable=self.character_fields['official_art_target'], width=10)
         widget.pack(side='left')
-        self.character_widgets.append(widget)
         ratings = ttk.Labelframe(page, text='Target images per character and rating (0 skips that rating)', padding=8)
         ratings.pack(fill='x', pady=(10, 0))
         for index, (rating, label) in enumerate(zip('gsqe', ('General', 'Sensitive', 'Questionable', 'Explicit'))):
@@ -273,12 +269,11 @@ class DownloaderGUI:
             widget = ttk.Entry(ratings, textvariable=self.character_fields[f'rating_{rating}'], width=10)
             widget.grid(row=1, column=index, sticky='ew', padx=6)
             ratings.columnconfigure(index, weight=1)
-            self.character_widgets.append(widget)
         actions = ttk.Frame(page)
-        actions.pack(fill='x')
+        actions.pack(fill='x', pady=(10, 0))
         self.discover_button = ttk.Button(actions, text='Find and add missing characters', command=self.start_discovery)
         self.discover_button.pack(side='left')
-        self.discovery_stop = ttk.Button(actions, text='Cancel search', command=self.discovery_cancel.set, state='disabled')
+        self.discovery_stop = ttk.Button(actions, text='Cancel search', command=self.stop_discovery, state='disabled')
         self.discovery_stop.pack(side='left', padx=8)
         self.add_character_button = ttk.Button(actions, text='Add character', command=self.add_character)
         self.add_character_button.pack(side='left')
@@ -340,10 +335,7 @@ class DownloaderGUI:
             return
         self.discovery_cancel.clear()
         self.discovery_running = True
-        self.discover_button.configure(state='disabled')
-        self.add_character_button.configure(state='disabled')
-        self.discovery_stop.configure(state='normal')
-        self.start_button.configure(state='disabled')
+        self.update_action_controls()
         self.discovery_status.set('Searching Danbooru API character tags…')
         def work():
             phase = 'Requesting character tags'
@@ -430,7 +422,22 @@ class DownloaderGUI:
                 messagebox.showerror('Missing characters', 'Could not save the JSON file.', parent=self.root)
 
     def update_batch_controls(self):
-        self.batch_entry.configure(state="normal" if self.auto_caption.get() and not self.running else "disabled")
+        enabled = self.auto_caption.get() and not (self.running or self.closing)
+        self.batch_entry.configure(state='normal' if enabled else 'disabled')
+
+    def update_action_controls(self):
+        idle = not (self.running or self.discovery_running or self.closing)
+        for button in (self.start_button, self.discover_button, self.add_character_button):
+            button.configure(state='normal' if idle else 'disabled')
+        editable = not (self.running or self.closing)
+        for widget in (self.add_button, self.caption_toggle, self.blacklist_entry):
+            widget.configure(state='normal' if editable else 'disabled')
+        can_stop = self.running and not self.cancel.is_set() and not self.closing
+        can_cancel_search = self.discovery_running and not self.discovery_cancel.is_set() and not self.closing
+        self.stop_button.configure(state='normal' if can_stop else 'disabled')
+        self.discovery_stop.configure(state='normal' if can_cancel_search else 'disabled')
+        self.update_batch_controls()
+        self.set_row_controls(editable)
 
     def export_character_tags(self):
         if not self.character_results:
@@ -494,8 +501,6 @@ class DownloaderGUI:
                 legacy = str(row.get('limit', '')).strip()
                 target = legacy if legacy.isdecimal() and int(legacy) > 0 else '200'
             identifier = self.add_row(row["source"], row["tags"], target)
-            if isinstance(row.get('gap_group'), str):
-                self.rows[identifier]['gap_group'] = row['gap_group']
             if row.get('character_generated') is True:
                 self.rows[identifier]['character_generated'] = True
             saved_status = row.get('status')
@@ -542,18 +547,15 @@ class DownloaderGUI:
             return
         self.search_notebook.select(self.search_page)
         identifiers = []
-        group = uuid.uuid4().hex
         for source, modifier, target in (('Danbooru', 'order:score', '200'), ('Gelbooru', 'sort:score', '250')):
             query = f'{tag} {modifier}'
             identifier = next((key for key, row in self.rows.items() if not row['tags'].strip()), None)
             if identifier is None:
                 identifier = self.add_row(source, query, target_value=target)
             else:
-                self.rows[identifier].update(source=source, tags=query, target=target)
-                row = self.rows[identifier]
+                self.rows[identifier] = dict(source=source, tags=query, target=target)
                 self.set_row_status(identifier, 'Queued')
             identifiers.append(identifier)
-            self.rows[identifier]['gap_group'] = group
         identifier = identifiers[0]
         self.table.selection_set(identifier)
         self.table.see(identifier)
@@ -561,7 +563,7 @@ class DownloaderGUI:
         self.auto_caption.set(True)
         self.update_batch_controls()
         self.update_row_count()
-        self.status.set('Set the desired total in done/, then click Start downloads.')
+        self.status.set('Set the target image count for images/ and done/, then click Start downloads.')
         self.begin_cell_edit(identifier, 2)
 
     def new_row(self):
@@ -683,25 +685,20 @@ class DownloaderGUI:
         self.set_row_controls(True)
 
     def remove_selected(self):
-        if self.running or self.closing:
-            return
-        self.finish_cell_edit()
-        selected = self.table.selection()
-        for identifier in selected:
-            self.rows.pop(identifier, None)
-        if selected:
-            self.table.delete(*selected)
-            if self.rows:
-                self.table.selection_set(next(iter(self.rows)))
-        self.select_row()
-        self.update_row_count()
+        self.remove_rows(self.table.selection())
 
     def remove_all(self):
-        if self.running or self.closing or not self.rows:
+        self.remove_rows(tuple(self.rows))
+
+    def remove_rows(self, identifiers):
+        if self.running or self.closing or not identifiers:
             return
         self.finish_cell_edit()
-        self.table.delete(*self.table.get_children())
-        self.rows.clear()
+        for identifier in identifiers:
+            del self.rows[identifier]
+        self.table.delete(*identifiers)
+        if self.rows:
+            self.table.selection_set(next(iter(self.rows)))
         self.select_row()
         self.update_row_count()
         self.save_settings()
@@ -712,8 +709,7 @@ class DownloaderGUI:
         self.remove_all_button.configure(state='normal' if enabled and self.rows else 'disabled')
         editable = enabled and len(selected) == 1
         for index, widget in enumerate(self.editor_widgets):
-            active = editable
-            widget.configure(state=("readonly" if index == 0 else "normal") if active else "disabled")
+            widget.configure(state=("readonly" if index == 0 else "normal") if editable else "disabled")
 
     def start(self):
         if self.running or self.discovery_running or self.closing:
@@ -763,16 +759,9 @@ class DownloaderGUI:
             return
         self.caption_batches = self.auto_caption.get()
         self.chunk_size = size
-        self.caption_toggle.configure(state="disabled")
-        self.batch_entry.configure(state="disabled")
         self.running = True
-        self.add_character_button.configure(state='disabled')
-        self.blacklist_entry.configure(state="disabled")
         self.cancel.clear()
-        self.add_button.configure(state="disabled")
-        self.start_button.configure(state="disabled")
-        self.stop_button.configure(state="normal")
-        self.set_row_controls(False)
+        self.update_action_controls()
         self.status.set("Downloading…")
         try:
             threading.Thread(target=self.work, args=(jobs,), daemon=True).start()
@@ -879,7 +868,12 @@ class DownloaderGUI:
     def stop(self):
         self.cancel.set()
         self.status.set("Stopping…")
-        self.stop_button.configure(state="disabled")
+        self.update_action_controls()
+
+    def stop_discovery(self):
+        self.discovery_cancel.set()
+        self.discovery_status.set('Cancelling search…')
+        self.update_action_controls()
 
     def poll(self):
         self.poll_job = None
@@ -912,11 +906,7 @@ class DownloaderGUI:
                     continue
                 if kind == 'character_finished':
                     self.discovery_running = False
-                    self.add_character_button.configure(state='normal')
-                    self.discovery_stop.configure(state='disabled')
-                    self.discover_button.configure(state='normal')
-                    if not self.closing:
-                        self.start_button.configure(state='normal')
+                    self.update_action_controls()
                     continue
                 if kind == "log":
                     follow = self.log.yview()[1] >= 0.99
@@ -932,16 +922,9 @@ class DownloaderGUI:
                     self.status.set(value)
                 if kind == "finished":
                     self.running = False
+                    self.update_action_controls()
                     if self.closing:
                         continue
-                    self.caption_toggle.configure(state="normal")
-                    self.update_batch_controls()
-                    self.blacklist_entry.configure(state="normal")
-                    self.add_button.configure(state="normal")
-                    self.start_button.configure(state="normal")
-                    self.add_character_button.configure(state='normal')
-                    self.stop_button.configure(state="disabled")
-                    self.set_row_controls(True)
                     self.save_settings()
                     checkpoint_rows = False
         except queue.Empty:
@@ -957,8 +940,7 @@ class DownloaderGUI:
             return
         self.finish_cell_edit()
         self.closing = True
-        self.add_button.configure(state="disabled")
-        self.start_button.configure(state="disabled")
+        self.update_action_controls()
         self.finish_close()
 
     def finish_close(self):
@@ -973,8 +955,7 @@ class DownloaderGUI:
                 # Keep the editable state available so a failed save can be
                 # retried instead of silently losing the queue on destruction.
                 self.closing = False
-                self.add_button.configure(state='normal')
-                self.start_button.configure(state='normal')
+                self.update_action_controls()
                 self.select_row()
                 self.status.set('Settings could not be saved. Fix permissions or disk space, then close again.')
                 return
